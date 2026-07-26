@@ -14,6 +14,8 @@
   --bubble-in: #ffffff;
   --panel-bg: #ffffff;
   --panel-header: #f0f2f5;
+  --sidebar-bg: #ffffff;
+  --sidebar-header: #f0f2f5;
   --border: #e9edef;
   --text: #111b21;
   --text-secondary: #667781;
@@ -25,18 +27,79 @@
   --success: #22c55e;
   --warning: #f59e0b;
   --info: #3b82f6;
+  --hover: #f5f6f6;
+  --active: #f0f2f5;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   color: var(--text);
-  height: 100vh;
-  height: 100dvh;
-  display: flex;
-  overflow: hidden;
+  height: 100vh; height: 100dvh;
+  display: flex; overflow: hidden;
 }
 .layout { display: flex; width: 100%; height: 100%; }
+
+/* ===== Chat list sidebar ===== */
+.chat-list {
+  width: 360px; flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.chat-list-header {
+  background: var(--sidebar-header);
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.chat-list-header .title { font-size: 18px; font-weight: 700; flex: 1; }
+.new-chat-btn {
+  background: var(--accent-dark); color: #fff; border: none;
+  border-radius: 50%; width: 40px; height: 40px;
+  font-size: 22px; cursor: pointer; display: flex;
+  align-items: center; justify-content: center;
+  transition: all 0.15s; flex-shrink: 0;
+}
+.new-chat-btn:hover { background: var(--header); transform: scale(1.05); }
+.new-chat-btn:active { transform: scale(0.95); }
+
+.chat-list-items {
+  flex: 1; overflow-y: auto;
+}
+.chat-list-items::-webkit-scrollbar { width: 6px; }
+.chat-list-items::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
+
+.chat-item {
+  padding: 12px 16px; display: flex; gap: 12px;
+  cursor: pointer; border-bottom: 1px solid var(--border);
+  transition: background 0.12s; position: relative;
+}
+.chat-item:hover { background: var(--hover); }
+.chat-item.active { background: var(--active); }
+.chat-item .ci-avatar {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--header); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700; flex-shrink: 0;
+}
+.chat-item .ci-body { flex: 1; min-width: 0; }
+.chat-item .ci-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.chat-item .ci-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item .ci-time { font-size: 11px; color: var(--text-light); flex-shrink: 0; }
+.chat-item .ci-preview { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.chat-item .ci-status { font-size: 10px; color: var(--accent-dark); margin-top: 2px; font-weight: 600; text-transform: uppercase; }
+.chat-item .ci-delete {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; color: var(--error);
+  font-size: 18px; cursor: pointer; padding: 4px;
+  opacity: 0; transition: opacity 0.15s; border-radius: 50%;
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+}
+.chat-item:hover .ci-delete { opacity: 0.7; }
+.chat-item .ci-delete:hover { opacity: 1; background: rgba(239,68,68,0.1); }
+.chat-list-empty { padding: 40px 20px; text-align: center; color: var(--text-light); font-size: 14px; }
 
 /* ===== Chat area ===== */
 .chat-area {
@@ -67,7 +130,7 @@ body {
   white-space: nowrap; transition: all 0.2s;
 }
 .status-badge.active { background: var(--accent); color: #fff; }
-.panel-toggle-mobile { display: none; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; padding: 4px; }
+.sidebar-toggle-mobile { display: none; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; padding: 4px; }
 
 /* ===== Messages ===== */
 .messages {
@@ -76,7 +139,6 @@ body {
   scroll-behavior: smooth; -webkit-overflow-scrolling: touch;
 }
 .messages::-webkit-scrollbar { width: 6px; }
-.messages::-webkit-scrollbar-track { background: transparent; }
 .messages::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
 
 .date-sep {
@@ -92,17 +154,12 @@ body {
   box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);
   animation: msgIn 0.2s ease-out;
 }
-@keyframes msgIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+@keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .message.inbound { align-self: flex-start; background: var(--bubble-in); border-top-left-radius: 0; }
 .message.outbound { align-self: flex-end; background: var(--bubble-out); border-top-right-radius: 0; }
-.message .time {
-  font-size: 10.5px; color: var(--text-light); float: right;
-  margin-top: 3px; margin-left: 8px; user-select: none;
-}
+.message .time { font-size: 10.5px; color: var(--text-light); float: right; margin-top: 3px; margin-left: 8px; user-select: none; }
 .message .checkmark { font-size: 10px; color: var(--info); margin-left: 2px; user-select: none; }
+.message.error-msg { background: #fee2e2; color: #991b1b; align-self: center; max-width: 80%; border-radius: 8px; }
 
 .welcome-msg {
   align-self: center; background: rgba(255,255,255,0.85);
@@ -149,24 +206,32 @@ body {
 .composer button:active { transform: scale(0.95); }
 .composer button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
+/* ===== Error banner ===== */
+.error-banner {
+  background: var(--error); color: #fff; padding: 8px 16px;
+  font-size: 13px; display: none; align-items: center; gap: 8px;
+  z-index: 20; flex-shrink: 0;
+}
+.error-banner.show { display: flex; }
+.error-banner .close-err {
+  background: transparent; border: none; color: #fff;
+  cursor: pointer; margin-left: auto; font-size: 18px; padding: 0 4px;
+}
+
 /* ===== Case panel ===== */
 .case-panel {
   width: 340px; background: var(--panel-bg); border-left: 1px solid var(--border);
   overflow-y: auto; flex-shrink: 0; display: flex; flex-direction: column;
 }
 .case-panel::-webkit-scrollbar { width: 6px; }
-.case-panel::-webkit-scrollbar-track { background: transparent; }
 .case-panel::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
-
 .panel-header-bar {
   padding: 12px 16px; background: var(--panel-header);
   display: flex; align-items: center; justify-content: space-between;
-  position: sticky; top: 0; z-index: 5;
-  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--border);
 }
 .panel-header-bar strong { font-size: 14px; }
 .panel-close { display: none; background: transparent; border: none; font-size: 24px; color: var(--text-secondary); cursor: pointer; padding: 4px 8px; }
-
 .panel-section { border-bottom: 1px solid var(--border); padding: 14px 16px; }
 .panel-section:last-child { border-bottom: none; }
 .panel-section h3 {
@@ -174,18 +239,15 @@ body {
   letter-spacing: 0.6px; margin-bottom: 10px; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
 }
-.panel-section h3 .count { background: var(--border); border-radius: 10px; padding: 1px 7px; font-size: 10px; color: var(--text-secondary); }
-
+.panel-section h3 .count { background: var(--border); border-radius: 10px; padding: 1px 7px; font-size: 10px; }
 .field-row { display: flex; justify-content: space-between; align-items: flex-start; font-size: 13px; padding: 3px 0; }
 .field-row .label { color: var(--text-secondary); flex-shrink: 0; }
 .field-row .value { font-weight: 500; text-align: right; word-break: break-word; }
-
 .vendor-card { font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--border); line-height: 1.4; }
 .vendor-card:last-child { border-bottom: none; }
 .vendor-card .v-name { font-weight: 600; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .vendor-card .v-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
 .vendor-card .v-quote { font-size: 11px; color: #056b00; margin-top: 2px; font-weight: 500; }
-
 .pill { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
 .pill.selected { background: #d1fae5; color: #065f46; }
 .pill.confirmed { background: #dbeafe; color: #1e40af; }
@@ -194,16 +256,12 @@ body {
 .pill.sent { background: #e0e7ff; color: #3730a3; }
 .pill.failed { background: #fee2e2; color: #991b1b; }
 .pill.skipped { background: #fef3c7; color: #92400e; }
-
-.rfq-text, .doc-text {
-  font-size: 12px; padding: 10px; border-radius: 8px;
-  white-space: pre-wrap; max-height: 220px; overflow-y: auto; line-height: 1.5;
-}
+.rfq-text, .doc-text { font-size: 12px; padding: 10px; border-radius: 8px; white-space: pre-wrap; max-height: 220px; overflow-y: auto; line-height: 1.5; }
 .rfq-text { background: var(--panel-header); }
 .doc-text { background: #fffbeb; border: 1px solid #fde68a; }
 .empty-state { color: var(--text-light); font-size: 13px; font-style: italic; padding: 4px 0; }
 
-/* ===== Mobile FAB ===== */
+/* ===== FABs ===== */
 .panel-fab {
   display: none; position: fixed; bottom: 72px; right: 16px;
   background: var(--header); color: #fff; border: none; border-radius: 50%;
@@ -212,48 +270,48 @@ body {
   transition: transform 0.15s; align-items: center; justify-content: center;
 }
 .panel-fab:active { transform: scale(0.92); }
-.panel-fab .badge {
-  position: absolute; top: -2px; right: -2px; background: var(--accent);
-  color: #fff; font-size: 10px; font-weight: 700; border-radius: 10px;
-  padding: 1px 6px; min-width: 18px; text-align: center;
-}
 
-/* ===== Connection ===== */
-.conn-indicator {
-  position: fixed; top: 0; left: 0; right: 0; background: var(--error);
-  color: #fff; text-align: center; font-size: 12px; padding: 4px;
-  z-index: 50; display: none;
-}
-.conn-indicator.show { display: block; }
-
+/* ===== Responsive ===== */
 @media (min-width: 901px) {
   .panel-fab { display: none; }
   .case-panel { display: flex; }
   .messages { padding: 16px 12%; }
 }
 @media (max-width: 900px) {
+  .chat-list { position: fixed; top: 0; left: 0; bottom: 0; width: 85%; max-width: 360px; z-index: 300; transform: translateX(-100%); transition: transform 0.25s ease; box-shadow: 4px 0 20px rgba(0,0,0,0.15); }
+  .chat-list.show { transform: translateX(0); display: flex; }
+  .sidebar-toggle-mobile { display: block; }
   .messages { padding: 12px 4%; }
   .message { max-width: 80%; }
-  .case-panel {
-    position: fixed; top: 0; right: 0; bottom: 0; width: 88%; max-width: 380px;
-    z-index: 200; transform: translateX(100%); transition: transform 0.25s ease;
-    box-shadow: -4px 0 20px rgba(0,0,0,0.15);
-  }
+  .case-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 88%; max-width: 380px; z-index: 200; transform: translateX(100%); transition: transform 0.25s ease; box-shadow: -4px 0 20px rgba(0,0,0,0.15); }
   .case-panel.show { transform: translateX(0); display: flex; }
   .panel-fab { display: flex; }
   .panel-close { display: block; }
-  .panel-toggle-mobile { display: block; }
 }
 </style>
 </head>
 <body>
 
-<div class="conn-indicator" id="conn-indicator">Reconnecting...</div>
-
 <div class="layout">
+  <!-- Chat list sidebar -->
+  <div class="chat-list" id="chat-list">
+    <div class="chat-list-header">
+      <div class="title">Boli Chats</div>
+      <button class="new-chat-btn" id="new-chat-btn" title="New chat">+</button>
+    </div>
+    <div class="chat-list-items" id="chat-list-items">
+      <div class="chat-list-empty">No chats yet. Click + to start.</div>
+    </div>
+  </div>
+
+  <!-- Chat area -->
   <div class="chat-area">
+    <div class="error-banner" id="error-banner">
+      <span id="error-text"></span>
+      <button class="close-err" id="close-err">&times;</button>
+    </div>
     <div class="chat-header">
-      <button class="panel-toggle-mobile" id="panel-toggle-mobile">&#9776;</button>
+      <button class="sidebar-toggle-mobile" id="sidebar-toggle-mobile">&#9776;</button>
       <div class="avatar">B</div>
       <div class="header-info">
         <div class="title">Boli Procurement Agent</div>
@@ -262,51 +320,36 @@ body {
       </div>
       <div class="status-badge" id="case-status-badge">Ready</div>
     </div>
-
     <div class="messages" id="messages"></div>
     <div class="typing" id="typing"><span></span><span></span><span></span></div>
-
     <div class="composer">
-      <input type="text" id="input" placeholder="Type a message..." autocomplete="off" autofocus />
+      <input type="text" id="input" placeholder="Type a message..." autocomplete="off" />
       <button id="send-btn" title="Send">&#9658;</button>
     </div>
   </div>
 
+  <!-- Case panel -->
   <div class="case-panel" id="case-panel">
     <div class="panel-header-bar">
       <strong>Case Details</strong>
       <button class="panel-close" id="panel-close">&times;</button>
     </div>
-    <div class="panel-section">
-      <h3>Procurement Case</h3>
-      <div id="case-details"><div class="empty-state">No active case</div></div>
-    </div>
-    <div class="panel-section">
-      <h3>Vendor Shortlist <span class="count" id="vendor-count" style="display:none">0</span></h3>
-      <div id="vendor-list"><div class="empty-state">No shortlist yet</div></div>
-    </div>
-    <div class="panel-section">
-      <h3>RFQ</h3>
-      <div id="rfq-panel"><div class="empty-state">No RFQ generated</div></div>
-    </div>
-    <div class="panel-section">
-      <h3>Vendor Responses</h3>
-      <div id="vendor-responses"><div class="empty-state">No outreach yet</div></div>
-    </div>
-    <div class="panel-section">
-      <h3>Draft Document</h3>
-      <div id="doc-panel"><div class="empty-state">No document generated</div></div>
-    </div>
+    <div class="panel-section"><h3>Procurement Case</h3><div id="case-details"><div class="empty-state">No active case</div></div></div>
+    <div class="panel-section"><h3>Vendor Shortlist <span class="count" id="vendor-count" style="display:none">0</span></h3><div id="vendor-list"><div class="empty-state">No shortlist yet</div></div></div>
+    <div class="panel-section"><h3>RFQ</h3><div id="rfq-panel"><div class="empty-state">No RFQ generated</div></div></div>
+    <div class="panel-section"><h3>Vendor Responses</h3><div id="vendor-responses"><div class="empty-state">No outreach yet</div></div></div>
+    <div class="panel-section"><h3>Draft Document</h3><div id="doc-panel"><div class="empty-state">No document generated</div></div></div>
   </div>
 </div>
 
-<button class="panel-fab" id="panel-fab" title="Case details">
-  &#9776;
-  <span class="badge" id="panel-badge" style="display:none;"></span>
-</button>
+<button class="panel-fab" id="panel-fab" title="Case details">&#9776;</button>
 
 <script>
 const API_BASE = window.location.origin;
+const STORAGE_KEY = 'boli_chat_sessions';
+
+let sessions = [];        // [{session_id, preview, case_status, updated_at}]
+let activeSessionId = null;
 let seenIds = new Set();
 let lastDate = null;
 let polling = false;
@@ -325,101 +368,176 @@ const caseStatusBadgeEl = document.getElementById('case-status-badge');
 const casePanelEl = document.getElementById('case-panel');
 const panelCloseBtn = document.getElementById('panel-close');
 const panelFab = document.getElementById('panel-fab');
-const panelBadge = document.getElementById('panel-badge');
-const panelToggleMobile = document.getElementById('panel-toggle-mobile');
-const connIndicator = document.getElementById('conn-indicator');
+const sidebarToggleMobile = document.getElementById('sidebar-toggle-mobile');
+const chatListEl = document.getElementById('chat-list');
+const chatListItemsEl = document.getElementById('chat-list-items');
+const newChatBtn = document.getElementById('new-chat-btn');
+const errorBannerEl = document.getElementById('error-banner');
+const errorTextEl = document.getElementById('error-text');
+const closeErrBtn = document.getElementById('close-err');
 const vendorCountEl = document.getElementById('vendor-count');
 
-async function initSession() {
-  try {
-    const res = await fetch(`${API_BASE}/api/browser-chat/session`, { method: 'POST' });
-    const data = await res.json();
-    renderTranscript(data);
-    connIndicator.classList.remove('show');
-  } catch (e) {
-    console.error('session init failed', e);
-    showWelcome();
-  }
-  startPolling();
+// ===== Session storage =====
+function loadSessions() {
+  try { const raw = localStorage.getItem(STORAGE_KEY); sessions = raw ? JSON.parse(raw) : []; }
+  catch { sessions = []; }
+}
+function saveSessions() { localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); }
+function updateSessionMeta(sessionId, preview, caseStatus) {
+  const s = sessions.find(x => x.session_id === sessionId);
+  if (s) { s.preview = preview || s.preview; s.case_status = caseStatus || s.case_status; s.updated_at = Date.now(); }
+  else { sessions.push({ session_id: sessionId, preview: preview || '', case_status: caseStatus || null, updated_at: Date.now() }); }
+  saveSessions();
+}
+function removeSession(sessionId) {
+  sessions = sessions.filter(s => s.session_id !== sessionId);
+  saveSessions();
 }
 
-function showWelcome() {
-  messagesEl.innerHTML = `<div class="welcome-msg">
-    <h2>Boli Procurement Agent</h2>
-    Describe what you need to source and where, and I'll find vendors, generate an RFQ, collect quotes, and compare bids for you.
-    <ul class="examples">
-      <li>Find pest control vendors in Jaipur</li>
-      <li>I need 500 corrugated boxes in Delhi</li>
-      <li>Looking for a caterer in Mumbai for 200 people</li>
-      <li>Find AC repair service near Indiranagar Bangalore</li>
-    </ul>
-  </div>`;
+// ===== Error display =====
+function showError(msg) {
+  errorTextEl.textContent = msg;
+  errorBannerEl.classList.add('show');
+  setTimeout(() => errorBannerEl.classList.remove('show'), 8000);
+}
+closeErrBtn.addEventListener('click', () => errorBannerEl.classList.remove('show'));
+
+// ===== Chat list rendering =====
+function renderChatList() {
+  if (sessions.length === 0) {
+    chatListItemsEl.innerHTML = '<div class="chat-list-empty">No chats yet. Click + to start.</div>';
+    return;
+  }
+  sessions.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+  chatListItemsEl.innerHTML = sessions.map(s => {
+    const isActive = s.session_id === activeSessionId;
+    const time = s.updated_at ? new Date(s.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const status = s.case_status ? `<div class="ci-status">${s.case_status.replace(/_/g, ' ')}</div>` : '';
+    const idx = sessions.indexOf(s) + 1;
+    return `<div class="chat-item ${isActive ? 'active' : ''}" data-session="${s.session_id}">
+      <div class="ci-avatar">${idx}</div>
+      <div class="ci-body">
+        <div class="ci-top">
+          <div class="ci-name">Chat ${idx}</div>
+          <div class="ci-time">${time}</div>
+        </div>
+        <div class="ci-preview">${esc(s.preview || 'No messages yet')}</div>
+        ${status}
+      </div>
+      <button class="ci-delete" data-delete="${s.session_id}" title="Delete chat">&#128465;</button>
+    </div>`;
+  }).join('');
+
+  chatListItemsEl.querySelectorAll('.chat-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.dataset.delete) return;
+      switchSession(el.dataset.session);
+    });
+  });
+  chatListItemsEl.querySelectorAll('.ci-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteSession(btn.dataset.delete);
+    });
+  });
+}
+
+// ===== Session management =====
+async function createNewSession() {
+  try {
+    const res = await fetch(`${API_BASE}/api/browser-chat/sessions`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    sessions.push({ session_id: data.session_id, preview: '', case_status: null, updated_at: Date.now() });
+    saveSessions();
+    switchSession(data.session_id);
+    renderChatList();
+  } catch (e) {
+    showError(`Failed to create chat: ${e.message}`);
+  }
+}
+
+async function switchSession(sessionId) {
+  if (sessionId === activeSessionId) return;
+  activeSessionId = sessionId;
+  seenIds.clear();
+  lastDate = null;
+  lastCaseId = null;
+  lastCaseStatus = null;
+  messagesEl.innerHTML = '';
+  resetCasePanel();
+  renderChatList();
+  closeMobileSidebar();
+  await loadMessages();
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm('Delete this chat and all its data? This cannot be undone.')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/browser-chat/sessions/${sessionId}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+    removeSession(sessionId);
+    if (sessionId === activeSessionId) {
+      if (sessions.length > 0) { await switchSession(sessions[0].session_id); }
+      else { activeSessionId = null; seenIds.clear(); messagesEl.innerHTML = ''; resetCasePanel(); showWelcome(); }
+    }
+    renderChatList();
+  } catch (e) {
+    showError(`Failed to delete chat: ${e.message}`);
+  }
+}
+
+// ===== Messages =====
+async function loadMessages() {
+  if (!activeSessionId) { showWelcome(); return; }
+  try {
+    const res = await fetch(`${API_BASE}/api/browser-chat/messages?session_id=${activeSessionId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderTranscript(data);
+    maybeFetchCasePanel(data.active_case_id, data.case_status);
+    pollFailCount = 0;
+  } catch (e) {
+    pollFailCount++;
+    if (pollFailCount >= 3) showError(`Connection issue: ${e.message}`);
+  }
 }
 
 async function sendMessage() {
   const text = inputEl.value.trim();
-  if (!text || isSending) return;
-  isSending = true;
-  sendBtn.disabled = true;
-  inputEl.value = '';
-  typingEl.classList.add('show');
-  scrollToBottom();
+  if (!text || isSending || !activeSessionId) return;
+  isSending = true; sendBtn.disabled = true; inputEl.value = '';
+  typingEl.classList.add('show'); scrollToBottom();
   const clientMessageId = 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   try {
     const res = await fetch(`${API_BASE}/api/browser-chat/messages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, client_message_id: clientMessageId }),
+      body: JSON.stringify({ text, session_id: activeSessionId, client_message_id: clientMessageId }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     renderTranscript(data);
     maybeFetchCasePanel(data.active_case_id, data.case_status);
-    connIndicator.classList.remove('show');
+    updateSessionMeta(activeSessionId, text, data.case_status);
+    renderChatList();
     pollFailCount = 0;
   } catch (e) {
-    console.error('send failed', e);
+    showError(`Send failed: ${e.message}`);
     const errDiv = document.createElement('div');
-    errDiv.className = 'message outbound';
-    errDiv.style.color = 'var(--error)';
-    errDiv.textContent = '(Failed to send — check connection and retry)';
+    errDiv.className = 'message error-msg';
+    errDiv.textContent = `Error: ${e.message}`;
     messagesEl.appendChild(errDiv);
     scrollToBottom();
   } finally {
-    isSending = false;
-    sendBtn.disabled = false;
-    typingEl.classList.remove('show');
-    inputEl.focus();
+    isSending = false; sendBtn.disabled = false;
+    typingEl.classList.remove('show'); inputEl.focus();
   }
 }
 
-async function pollMessages() {
-  if (polling) return;
-  polling = true;
-  try {
-    const res = await fetch(`${API_BASE}/api/browser-chat/messages`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    renderTranscript(data);
-    maybeFetchCasePanel(data.active_case_id, data.case_status);
-    connIndicator.classList.remove('show');
-    pollFailCount = 0;
-  } catch (e) {
-    pollFailCount++;
-    if (pollFailCount >= 3) connIndicator.classList.add('show');
-  } finally {
-    polling = false;
-  }
-}
-
-function startPolling() { setInterval(pollMessages, 3000); }
-
-function maybeFetchCasePanel(caseId, caseStatus) {
-  if (!caseId) { lastCaseId = null; lastCaseStatus = null; return; }
-  if (caseId === lastCaseId && caseStatus === lastCaseStatus) return;
-  lastCaseId = caseId;
-  lastCaseStatus = caseStatus;
-  fetchCasePanel(caseId);
-}
+function startPolling() { setInterval(loadMessages, 3000); }
 
 function renderTranscript(data) {
   if (!data || !data.messages || data.messages.length === 0) {
@@ -435,27 +553,41 @@ function renderTranscript(data) {
     if (msgDate !== lastDate) {
       lastDate = msgDate;
       const sep = document.createElement('div');
-      sep.className = 'date-sep';
-      sep.textContent = msgDate;
+      sep.className = 'date-sep'; sep.textContent = msgDate;
       messagesEl.appendChild(sep);
     }
     const div = document.createElement('div');
     div.className = `message ${msg.direction}`;
     div.dataset.id = msg.id;
     div.innerHTML = `${escapeHtml(msg.body)}<span class="time">${formatTime(msg.created_at)}</span>${
-      msg.direction === 'outbound' ? '<span class="checkmark">&#10003;&#10003;</span>' : ''
-    }`;
+      msg.direction === 'outbound' ? '<span class="checkmark">&#10003;&#10003;</span>' : ''}`;
     messagesEl.appendChild(div);
     appended = true;
   });
   if (appended) scrollToBottom();
   updateHeader(data);
+  if (data.messages.length > 0) {
+    const last = data.messages[data.messages.length - 1];
+    updateSessionMeta(activeSessionId, last.body.slice(0, 60), data.case_status);
+  }
+}
+
+function showWelcome() {
+  messagesEl.innerHTML = `<div class="welcome-msg">
+    <h2>Boli Procurement Agent</h2>
+    Describe what you need to source and where, and I'll find vendors, generate an RFQ, collect quotes, and compare bids.
+    <ul class="examples">
+      <li>Find pest control vendors in Jaipur</li>
+      <li>I need 500 corrugated boxes in Delhi</li>
+      <li>Looking for a caterer in Mumbai for 200 people</li>
+      <li>Find AC repair service near Indiranagar Bangalore</li>
+    </ul>
+  </div>`;
 }
 
 function updateHeader(data) {
-  if (data && data.active_case_id) {
-    caseIdTextEl.textContent = `Case: ${data.active_case_id.slice(0, 8)}...`;
-  } else { caseIdTextEl.textContent = ''; }
+  if (data && data.active_case_id) caseIdTextEl.textContent = `Case: ${data.active_case_id.slice(0, 8)}...`;
+  else caseIdTextEl.textContent = '';
   if (data && data.case_status) {
     caseStatusBadgeEl.textContent = data.case_status.replace(/_/g, ' ');
     caseStatusBadgeEl.classList.add('active');
@@ -467,8 +599,22 @@ function updateHeader(data) {
   }
 }
 
-function scrollToBottom() {
-  requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
+function scrollToBottom() { requestAnimationFrame(() => { messagesEl.scrollTop = messagesEl.scrollHeight; }); }
+
+function maybeFetchCasePanel(caseId, caseStatus) {
+  if (!caseId) { lastCaseId = null; lastCaseStatus = null; return; }
+  if (caseId === lastCaseId && caseStatus === lastCaseStatus) return;
+  lastCaseId = caseId; lastCaseStatus = caseStatus;
+  fetchCasePanel(caseId);
+}
+
+function resetCasePanel() {
+  document.getElementById('case-details').innerHTML = '<div class="empty-state">No active case</div>';
+  document.getElementById('vendor-list').innerHTML = '<div class="empty-state">No shortlist yet</div>';
+  document.getElementById('rfq-panel').innerHTML = '<div class="empty-state">No RFQ generated</div>';
+  document.getElementById('vendor-responses').innerHTML = '<div class="empty-state">No outreach yet</div>';
+  document.getElementById('doc-panel').innerHTML = '<div class="empty-state">No document generated</div>';
+  vendorCountEl.style.display = 'none';
 }
 
 async function fetchCasePanel(caseId) {
@@ -499,20 +645,18 @@ function renderCaseDetails(caseData) {
     <div class="field-row"><span class="label">Type</span><span class="value">${esc(caseData.request_type || '-')}</span></div>
     <div class="field-row"><span class="label">Budget</span><span class="value">${esc(caseData.budget || '-')}</span></div>
     <div class="field-row"><span class="label">Quantity</span><span class="value">${esc(caseData.quantity || '-')}</span></div>
-    <div class="field-row"><span class="label">Deadline</span><span class="value">${esc(caseData.deadline || '-')}</span></div>
-  `;
+    <div class="field-row"><span class="label">Deadline</span><span class="value">${esc(caseData.deadline || '-')}</span></div>`;
 }
 
-function statusPill(status) {
-  const map = { new: 'sent', needs_clarification: 'skipped', ready_to_search: 'sent', searching: 'sent', shortlist_ready: 'sent', awaiting_shortlist_confirmation: 'sent', rfq_ready: 'confirmed', outreach_approved: 'confirmed', outreach_in_progress: 'sent', collecting_responses: 'sent', awaiting_approval: 'confirmed', document_ready: 'responded', failed: 'failed', closed: 'expired' };
-  return map[status] || 'sent';
+function statusPill(s) {
+  const m = { new:'sent', needs_clarification:'skipped', ready_to_search:'sent', searching:'sent', shortlist_ready:'sent', awaiting_shortlist_confirmation:'sent', rfq_ready:'confirmed', outreach_approved:'confirmed', outreach_in_progress:'sent', collecting_responses:'sent', awaiting_approval:'confirmed', document_ready:'responded', failed:'failed', closed:'expired' };
+  return m[s] || 'sent';
 }
 
 function renderVendorList(candidates) {
   const el = document.getElementById('vendor-list');
   if (!candidates || candidates.length === 0) { el.innerHTML = '<div class="empty-state">No shortlist yet</div>'; vendorCountEl.style.display = 'none'; return; }
-  vendorCountEl.style.display = 'inline-block';
-  vendorCountEl.textContent = candidates.length;
+  vendorCountEl.style.display = 'inline-block'; vendorCountEl.textContent = candidates.length;
   el.innerHTML = candidates.map(c => `
     <div class="vendor-card">
       <div class="v-name">${c.position}. ${esc(c.name)}
@@ -521,8 +665,7 @@ function renderVendorList(candidates) {
       </div>
       <div class="v-meta">${esc(c.phone || 'No phone')} ${c.rating ? '&bull; &#9733; ' + c.rating : ''} ${c.review_count ? '(' + c.review_count + ')' : ''}</div>
       ${c.website ? `<div class="v-meta"><a href="${esc(c.website)}" target="_blank" style="color:var(--link)">${esc(c.website)}</a></div>` : ''}
-    </div>
-  `).join('');
+    </div>`).join('');
 }
 
 async function fetchRfq(caseId) {
@@ -531,7 +674,7 @@ async function fetchRfq(caseId) {
     if (!res.ok) return;
     const rfq = await res.json();
     document.getElementById('rfq-panel').innerHTML = `<div class="rfq-text">${escapeHtml(rfq.document_text)}</div>`;
-  } catch (e) {}
+  } catch {}
 }
 
 async function fetchVendorResponses(caseId) {
@@ -559,7 +702,7 @@ async function fetchVendorResponses(caseId) {
         ${fields ? `<div class="v-quote">${esc(fields)}</div>` : ''}
       </div>`;
     }).join('');
-  } catch (e) {}
+  } catch {}
 }
 
 async function fetchDocument(caseId) {
@@ -568,32 +711,48 @@ async function fetchDocument(caseId) {
     if (!res.ok) return;
     const doc = await res.json();
     document.getElementById('doc-panel').innerHTML = `<div class="doc-text">${escapeHtml(doc.document)}</div>`;
-  } catch (e) {}
+  } catch {}
 }
 
-function formatTime(iso) { try { const d = new Date(iso); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } }
-function formatDate(iso) {
-  try {
-    const d = new Date(iso); const today = new Date();
-    if (d.toDateString() === today.toDateString()) return 'Today';
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
-  } catch { return ''; }
-}
+function closeMobileSidebar() { chatListEl.classList.remove('show'); }
+
+function formatTime(iso) { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } }
+function formatDate(iso) { try {
+  const d = new Date(iso); const today = new Date();
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  const y = new Date(today); y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+} catch { return ''; } }
+
 function escapeHtml(str) {
   if (str == null) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\n/g,'<br>');
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
+// ===== Event listeners =====
 sendBtn.addEventListener('click', sendMessage);
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+newChatBtn.addEventListener('click', createNewSession);
+sidebarToggleMobile.addEventListener('click', () => chatListEl.classList.toggle('show'));
 panelFab.addEventListener('click', () => casePanelEl.classList.add('show'));
-panelToggleMobile.addEventListener('click', () => casePanelEl.classList.add('show'));
 panelCloseBtn.addEventListener('click', () => casePanelEl.classList.remove('show'));
 
-initSession();
+// ===== Init =====
+async function init() {
+  loadSessions();
+  if (sessions.length === 0) {
+    await createNewSession();
+  } else {
+    activeSessionId = sessions[0].session_id;
+    renderChatList();
+    await loadMessages();
+  }
+  startPolling();
+}
+
+init();
 </script>
 </body>
 </html>

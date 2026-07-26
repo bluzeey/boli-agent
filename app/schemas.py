@@ -191,6 +191,7 @@ class OutreachSummaryRead(BaseModel):
 
 class BrowserChatMessageSend(BaseModel):
     text: str
+    session_id: str | None = None
     client_message_id: str | None = None
 
 
@@ -212,3 +213,16 @@ class BrowserChatTranscriptRead(BaseModel):
     active_case_id: str | None = None
     case_status: str | None = None
     messages: list[BrowserChatMessageRead] = Field(default_factory=list)
+
+
+class BrowserChatSessionSummary(BaseModel):
+    session_id: str
+    preview: str = ""
+    case_status: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BrowserChatDeleteResponse(BaseModel):
+    session_id: str
+    deleted: bool = True

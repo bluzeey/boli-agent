@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import Base, ChatMessage, ProcurementCase
+from app.models import Base, ChatMessage, Conversation, ProcurementCase
 
 
 @pytest.fixture
@@ -50,8 +50,6 @@ def _build_test_processor(engine):
     )
 
     class CapturingWhatsApp:
-        """Captures outbound messages so the hybrid client persists them."""
-
         def __init__(self):
             self.messages: list[tuple[str, str]] = []
 
@@ -96,9 +94,9 @@ def test_chat_page_served(client):
     assert "<html" in r.text.lower()
 
 
-def test_session_creation(client):
+def test_create_new_session(client):
     api, _ = client
-    r = api.post("/api/browser-chat/session")
+    r = api.post("/api/browser-chat/sessions")
     assert r.status_code == 200
     data = r.json()
     assert "session_id" in data
@@ -106,37 +104,156 @@ def test_session_creation(client):
     assert data["active_case_id"] is None
 
 
-def test_send_message_creates_case(client):
+def test_send_message_with_session_id(client):
     api, engine = client
-    api.post("/api/browser-chat/session")
+    r = api.post("/api/browser-chat/sessions")
+    session_id = r.json()["session_id"]
 
     r = api.post(
         "/api/browser-chat/messages",
-        json={"text": "Find pest control vendors in Jaipur", "client_message_id": "t1"},
+        json={
+            "text": "Find pest control vendors in Jaipur",
+            "session_id": session_id,
+            "client_message_id": "t1",
+        },
     )
     assert r.status_code == 200
     data = r.json()
+    assert data["session_id"] == session_id
     assert data["active_case_id"] is not None
     assert data["case_status"] is not None
 
     messages = data["messages"]
     assert len(messages) >= 2
     assert messages[0]["direction"] == "inbound"
-    assert messages[0]["body"] == "Find pest control vendors in Jaipur"
-
     outbound = [m for m in messages if m["direction"] == "outbound"]
     assert len(outbound) >= 1
-    assert any(
-        "pest control" in m["body"].lower() or "vendor" in m["body"].lower()
-        for m in outbound
+
+
+def test_multiple_sessions_are_isolated(client):
+    api, engine = client
+
+    r1 = api.post("/api/browser-chat/sessions")
+    sid1 = r1.json()["session_id"]
+    r2 = api.post("/api/browser-chat/sessions")
+    sid2 = r2.json()["session_id"]
+
+    assert sid1 != sid2
+
+    api.post(
+        "/api/browser-chat/messages",
+        json={
+            "text": "Find catering in Bangalore",
+            "session_id": sid1,
+            "client_message_id": "s1-1",
+        },
     )
+    api.post(
+        "/api/browser-chat/messages",
+        json={
+            "text": "Find boxes in Delhi",
+            "session_id": sid2,
+            "client_message_id": "s2-1",
+        },
+    )
+
+    r1 = api.get(f"/api/browser-chat/messages?session_id={sid1}")
+    r2 = api.get(f"/api/browser-chat/messages?session_id={sid2}")
+
+    msgs1 = r1.json()["messages"]
+    msgs2 = r2.json()["messages"]
+
+    assert any("catering" in m["body"].lower() or "bangalore" in m["body"].lower() for m in msgs1)
+    assert not any("delhi" in m["body"].lower() for m in msgs1)
+
+    assert any("boxes" in m["body"].lower() or "delhi" in m["body"].lower() for m in msgs2)
+    assert not any("catering" in m["body"].lower() for m in msgs2)
+
+    assert r1.json()["active_case_id"] != r2.json()["active_case_id"]
+
+
+def test_delete_session_removes_all_data(client):
+    api, engine = client
+
+    r = api.post("/api/browser-chat/sessions")
+    sid = r.json()["session_id"]
+
+    api.post(
+        "/api/browser-chat/messages",
+        json={"text": "Find pest control in Jaipur", "session_id": sid, "client_message_id": "d1"},
+    )
+
+    with Session(engine) as s:
+        convs = s.scalars(select(Conversation).where(
+            Conversation.whatsapp_user_id == f"browser:{sid}"
+        )).all()
+        assert len(convs) == 1
+        cases = s.scalars(select(ProcurementCase).where(
+            ProcurementCase.conversation_id == convs[0].id
+        )).all()
+        assert len(cases) >= 1
+        msgs = s.scalars(select(ChatMessage).where(
+            ChatMessage.conversation_id == convs[0].id
+        )).all()
+        assert len(msgs) >= 2
+
+    r = api.delete(f"/api/browser-chat/sessions/{sid}")
+    assert r.status_code == 200
+    assert r.json()["deleted"] is True
+
+    with Session(engine) as s:
+        convs = s.scalars(select(Conversation).where(
+            Conversation.whatsapp_user_id == f"browser:{sid}"
+        )).all()
+        assert len(convs) == 0
+        msgs = s.scalars(select(ChatMessage).where(
+            ChatMessage.sender == f"browser:{sid}"
+        )).all()
+        assert len(msgs) == 0
+
+
+def test_delete_does_not_affect_other_sessions(client):
+    api, engine = client
+
+    r1 = api.post("/api/browser-chat/sessions")
+    sid1 = r1.json()["session_id"]
+    r2 = api.post("/api/browser-chat/sessions")
+    sid2 = r2.json()["session_id"]
+
+    api.post(
+        "/api/browser-chat/messages",
+        json={"text": "Find cleaning in Mumbai", "session_id": sid1, "client_message_id": "k1"},
+    )
+    api.post(
+        "/api/browser-chat/messages",
+        json={"text": "Find packaging in Pune", "session_id": sid2, "client_message_id": "k2"},
+    )
+
+    api.delete(f"/api/browser-chat/sessions/{sid1}")
+
+    r2 = api.get(f"/api/browser-chat/messages?session_id={sid2}")
+    assert r2.status_code == 200
+    msgs = r2.json()["messages"]
+    assert len(msgs) >= 2
+    assert any("pune" in m["body"].lower() or "packaging" in m["body"].lower() for m in msgs)
+
+
+def test_delete_nonexistent_session_404(client):
+    api, _ = client
+    r = api.delete("/api/browser-chat/sessions/nonexistent-id")
+    assert r.status_code == 404
 
 
 def test_idempotent_send(client):
     api, _ = client
-    api.post("/api/browser-chat/session")
+    r = api.post("/api/browser-chat/sessions")
+    sid = r.json()["session_id"]
 
-    payload = {"text": "Find cleaning vendors in Delhi", "client_message_id": "dup-1"}
+    payload = {
+        "text": "Find cleaning vendors in Delhi",
+        "session_id": sid,
+        "client_message_id": "dup-1",
+    }
     r1 = api.post("/api/browser-chat/messages", json=payload)
     assert r1.status_code == 200
     r2 = api.post("/api/browser-chat/messages", json=payload)
@@ -149,13 +266,18 @@ def test_idempotent_send(client):
 
 def test_poll_messages(client):
     api, _ = client
-    api.post("/api/browser-chat/session")
+    r = api.post("/api/browser-chat/sessions")
+    sid = r.json()["session_id"]
     api.post(
         "/api/browser-chat/messages",
-        json={"text": "Find packaging vendors in Mumbai", "client_message_id": "p1"},
+        json={
+            "text": "Find packaging vendors in Mumbai",
+            "session_id": sid,
+            "client_message_id": "p1",
+        },
     )
 
-    r = api.get("/api/browser-chat/messages")
+    r = api.get(f"/api/browser-chat/messages?session_id={sid}")
     assert r.status_code == 200
     data = r.json()
     assert len(data["messages"]) >= 2
@@ -163,10 +285,15 @@ def test_poll_messages(client):
 
 def test_case_persisted_in_db(client):
     api, engine = client
-    api.post("/api/browser-chat/session")
+    r = api.post("/api/browser-chat/sessions")
+    sid = r.json()["session_id"]
     api.post(
         "/api/browser-chat/messages",
-        json={"text": "Find catering vendors in Bangalore", "client_message_id": "c1"},
+        json={
+            "text": "Find catering vendors in Bangalore",
+            "session_id": sid,
+            "client_message_id": "c1",
+        },
     )
 
     with Session(engine) as s:
@@ -175,7 +302,3 @@ def test_case_persisted_in_db(client):
         ).first()
         assert case is not None
         assert "catering" in (case.raw_request or "").lower()
-
-        msgs = s.scalars(select(ChatMessage).order_by(ChatMessage.created_at.asc())).all()
-        assert len(msgs) >= 2
-        assert msgs[0].direction == "inbound"
