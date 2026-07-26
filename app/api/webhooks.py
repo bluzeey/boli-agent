@@ -1,15 +1,22 @@
 import json
 import logging
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.container import build_webhook_processor
-from app.db import engine
+from app.db import SessionLocal, engine
 from app.integrations.twilio import extract_twilio_inbound, verify_twilio_signature
-from app.integrations.whatsapp import extract_inbound_messages, verify_whatsapp_signature
+from app.integrations.whatsapp import (
+    extract_inbound_messages,
+    normalize_phone,
+    verify_whatsapp_signature,
+)
+from app.models import ProcurementCase, Vendor, VendorResponse, VendorResponseStatus
 
 logger = logging.getLogger("boli.webhooks")
 
@@ -18,7 +25,8 @@ twilio_router = APIRouter(prefix="/webhooks/twilio", tags=["whatsapp"])
 settings = get_settings()
 logger.info(
     "webhooks: routes registered (meta=/webhooks/whatsapp, "
-    "twilio=/webhooks/twilio/whatsapp, provider=%s)",
+    "twilio=/webhooks/twilio/whatsapp, twilio-status=/webhooks/twilio/status, "
+    "provider=%s)",
     settings.whatsapp_provider,
 )
 
@@ -140,3 +148,85 @@ async def receive_twilio_webhook(request: Request) -> dict[str, str]:
     _process_messages(messages)
     logger.info("twilio POST: processing complete, returning accepted")
     return {"status": "accepted"}
+
+
+_ACTIVE_OUTREACH_STATES = {
+    "outreach_approved",
+    "outreach_in_progress",
+    "collecting_responses",
+}
+
+
+@twilio_router.post("/status")
+async def receive_twilio_status(request: Request) -> dict[str, str]:
+    """Receive Twilio delivery status callbacks for outbound messages.
+
+    Twilio posts form-encoded fields: MessageSid, MessageStatus, To, From,
+    ErrorCode, ErrorMessage, etc.  We log every callback and best-effort
+    update the matching VendorResponse row.
+    """
+    form = dict(await request.form())
+    message_sid = form.get("MessageSid", "")
+    message_status = form.get("MessageStatus", "")
+    to_number = form.get("To", "")
+    error_code = form.get("ErrorCode", "")
+    error_message = form.get("ErrorMessage", "")
+
+    logger.info(
+        "twilio STATUS: MessageSid=%s MessageStatus=%s To=%s ErrorCode=%s ErrorMessage=%s",
+        message_sid,
+        message_status,
+        to_number,
+        error_code,
+        error_message,
+    )
+
+    # Best-effort: match the recipient phone to a VendorResponse on an active case.
+    to_digits = normalize_phone(to_number)
+    if to_digits:
+        try:
+            with SessionLocal() as session:
+                rows = session.execute(
+                    select(VendorResponse, Vendor, ProcurementCase)
+                    .join(Vendor, VendorResponse.vendor_id == Vendor.id)
+                    .join(ProcurementCase, ProcurementCase.id == VendorResponse.case_id)
+                    .where(ProcurementCase.status.in_(_ACTIVE_OUTREACH_STATES))
+                    .order_by(VendorResponse.updated_at.desc())
+                ).all()
+
+                matched = False
+                for response, vendor, case in rows:
+                    if normalize_phone(vendor.phone) == to_digits:
+                        now = datetime.now(UTC)
+                        if message_status == "sent":
+                            response.sent_at = now
+                            response.status = VendorResponseStatus.SENT.value
+                        elif message_status == "delivered":
+                            response.delivered_at = now
+                            response.status = VendorResponseStatus.DELIVERED.value
+                        elif message_status in ("failed", "undelivered"):
+                            response.status = VendorResponseStatus.FAILED.value
+                            response.last_error = f"Twilio: {error_message or message_status}"
+                        response.updated_at = now
+                        session.add(response)
+                        session.commit()
+                        logger.info(
+                            "twilio STATUS: matched VendorResponse id=%s case_id=%s "
+                            "vendor=%s -> status=%s",
+                            response.id,
+                            case.id,
+                            vendor.name,
+                            response.status,
+                        )
+                        matched = True
+                        break
+
+                if not matched:
+                    logger.info(
+                        "twilio STATUS: no matching VendorResponse for To=%s",
+                        to_number,
+                    )
+        except Exception as exc:
+            logger.exception("twilio STATUS: error updating VendorResponse: %s", exc)
+
+    return {"status": "received"}
