@@ -37,7 +37,6 @@ def client(monkeypatch):
 
 
 def _build_test_processor(engine):
-    from app.search.mock import MockSearchProvider
     from app.services.orchestrator import ProcurementOrchestrator
     from app.services.webhook_processor import WhatsAppWebhookProcessor
 
@@ -75,12 +74,14 @@ def _build_test_processor(engine):
         def transcribe_audio(self, audio, mime_type):
             raise RuntimeError("not supported")
 
+    from tests.conftest import FakeSearchProvider
+
     whatsapp = CapturingWhatsApp()
     from app.integrations.hybrid_whatsapp import HybridWhatsAppClient
     hybrid = HybridWhatsAppClient(whatsapp)
 
     sarvam = FakeSarvam()
-    search = MockSearchProvider()
+    search = FakeSearchProvider()
     orchestrator = ProcurementOrchestrator(settings, hybrid, sarvam, search)
     processor = WhatsAppWebhookProcessor(hybrid, sarvam, orchestrator)
     processor._test_engine = engine

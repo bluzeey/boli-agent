@@ -23,6 +23,7 @@ from app.services.chat_transcript import (
     get_or_create_conversation,
     list_messages,
     record_inbound_message,
+    record_outbound_message,
 )
 
 logger = logging.getLogger("boli.browser_chat")
@@ -125,17 +126,22 @@ def send_browser_chat_message(
             logger.exception(
                 "browser chat processing failed for sender=%s: %s", sender, exc
             )
-            try:
-                processor.whatsapp.send_text(
-                    sender,
-                    "I could not process that message. Please rephrase and try again.",
-                )
-            except Exception:
-                logger.exception("browser chat failed to send fallback error reply")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Processing failed: {exc}",
-            ) from exc
+            error_body = f"[ERROR] {exc}"
+            with Session(db_module.engine, expire_on_commit=False) as session:
+                conv = session.scalars(
+                    select(Conversation).where(
+                        Conversation.whatsapp_user_id == sender
+                    )
+                ).first()
+                if conv:
+                    record_outbound_message(
+                        session,
+                        conv.id,
+                        sender="system",
+                        body=error_body,
+                        transport="error",
+                    )
+                    session.commit()
 
     return _snapshot_for_session(sid)
 

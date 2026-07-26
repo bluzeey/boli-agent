@@ -168,12 +168,10 @@ Search query must be suitable for vendor discovery and should contain the catego
             parsed = self._parse_json_response(content)
             return RequirementExtraction.model_validate(parsed)
         except Exception as exc:
-            logger.warning(
-                "extract_requirement: failed to parse Sarvam response, "
-                "falling back to heuristic: %s",
-                exc,
-            )
-            return heuristic_extract_requirement(text, existing_case)
+            raise RuntimeError(
+                f"Sarvam extract_requirement parse failed: {exc}. "
+                f"Raw content (first 500 chars): {content[:500]}"
+            ) from exc
 
     def extract_quote(self, reply_text: str, required_fields: list[str]) -> QuoteExtraction:
         if not self.settings.sarvam_api_key:
@@ -222,12 +220,10 @@ Search query must be suitable for vendor discovery and should contain the catego
             parsed = self._parse_json_response(content)
             return QuoteExtraction.model_validate(parsed)
         except Exception as exc:
-            logger.warning(
-                "extract_quote: failed to parse Sarvam response, "
-                "falling back to heuristic: %s",
-                exc,
-            )
-            return heuristic_extract_quote(reply_text, required_fields)
+            raise RuntimeError(
+                f"Sarvam extract_quote parse failed: {exc}. "
+                f"Raw content (first 500 chars): {content[:500]}"
+            ) from exc
 
 
 def heuristic_extract_requirement(

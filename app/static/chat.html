@@ -159,7 +159,8 @@ body {
 .message.outbound { align-self: flex-end; background: var(--bubble-out); border-top-right-radius: 0; }
 .message .time { font-size: 10.5px; color: var(--text-light); float: right; margin-top: 3px; margin-left: 8px; user-select: none; }
 .message .checkmark { font-size: 10px; color: var(--info); margin-left: 2px; user-select: none; }
-.message.error-msg { background: #fee2e2; color: #991b1b; align-self: center; max-width: 80%; border-radius: 8px; }
+.message.error-msg { background: #fef2f2; color: #991b1b; align-self: center; max-width: 85%; border-radius: 8px; border: 1px solid #fecaca; font-family: monospace; font-size: 12px; }
+.message.error-msg::before { content: "\26A0 "; font-size: 14px; }
 
 .welcome-msg {
   align-self: center; background: rgba(255,255,255,0.85);
@@ -339,6 +340,7 @@ body {
     <div class="panel-section"><h3>RFQ</h3><div id="rfq-panel"><div class="empty-state">No RFQ generated</div></div></div>
     <div class="panel-section"><h3>Vendor Responses</h3><div id="vendor-responses"><div class="empty-state">No outreach yet</div></div></div>
     <div class="panel-section"><h3>Draft Document</h3><div id="doc-panel"><div class="empty-state">No document generated</div></div></div>
+    <div class="panel-section" id="errors-section" style="display:none;"><h3 style="color:var(--error)">System Errors</h3><div id="error-list"></div></div>
   </div>
 </div>
 
@@ -540,12 +542,14 @@ async function sendMessage() {
 function startPolling() { setInterval(loadMessages, 3000); }
 
 function renderTranscript(data) {
-  if (!data || !data.messages || data.messages.length === 0) {
+  if (!data || data.session_id !== activeSessionId) return;
+  if (!data.messages || data.messages.length === 0) {
     if (seenIds.size === 0) showWelcome();
     updateHeader(data);
     return;
   }
   let appended = false;
+  const errors = [];
   data.messages.forEach(msg => {
     if (seenIds.has(msg.id)) return;
     seenIds.add(msg.id);
@@ -557,18 +561,28 @@ function renderTranscript(data) {
       messagesEl.appendChild(sep);
     }
     const div = document.createElement('div');
-    div.className = `message ${msg.direction}`;
-    div.dataset.id = msg.id;
-    div.innerHTML = `${escapeHtml(msg.body)}<span class="time">${formatTime(msg.created_at)}</span>${
-      msg.direction === 'outbound' ? '<span class="checkmark">&#10003;&#10003;</span>' : ''}`;
+    if (msg.transport === 'error') {
+      div.className = 'message error-msg';
+      div.dataset.id = msg.id;
+      div.textContent = msg.body;
+      errors.push(msg);
+    } else {
+      div.className = `message ${msg.direction}`;
+      div.dataset.id = msg.id;
+      div.innerHTML = `${escapeHtml(msg.body)}<span class="time">${formatTime(msg.created_at)}</span>${
+        msg.direction === 'outbound' ? '<span class="checkmark">&#10003;&#10003;</span>' : ''}`;
+    }
     messagesEl.appendChild(div);
     appended = true;
   });
   if (appended) scrollToBottom();
   updateHeader(data);
+  updateErrorsPanel(errors.length ? data.messages.filter(m => m.transport === 'error') : []);
   if (data.messages.length > 0) {
     const last = data.messages[data.messages.length - 1];
-    updateSessionMeta(activeSessionId, last.body.slice(0, 60), data.case_status);
+    if (last.transport !== 'error') {
+      updateSessionMeta(activeSessionId, last.body.slice(0, 60), data.case_status);
+    }
   }
 }
 
@@ -614,7 +628,25 @@ function resetCasePanel() {
   document.getElementById('rfq-panel').innerHTML = '<div class="empty-state">No RFQ generated</div>';
   document.getElementById('vendor-responses').innerHTML = '<div class="empty-state">No outreach yet</div>';
   document.getElementById('doc-panel').innerHTML = '<div class="empty-state">No document generated</div>';
+  document.getElementById('errors-section').style.display = 'none';
+  document.getElementById('error-list').innerHTML = '';
   vendorCountEl.style.display = 'none';
+}
+
+function updateErrorsPanel(errorMsgs) {
+  const section = document.getElementById('errors-section');
+  const list = document.getElementById('error-list');
+  if (!errorMsgs || errorMsgs.length === 0) {
+    section.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+  section.style.display = 'block';
+  list.innerHTML = errorMsgs.map(e => `
+    <div class="vendor-card" style="border-color:#fecaca;">
+      <div class="v-meta" style="color:var(--error);font-weight:600;font-size:12px;">${formatTime(e.created_at)}</div>
+      <div class="v-meta" style="font-family:monospace;font-size:11px;color:#991b1b;white-space:pre-wrap;word-break:break-all;">${escapeHtml(e.body)}</div>
+    </div>`).join('');
 }
 
 async function fetchCasePanel(caseId) {

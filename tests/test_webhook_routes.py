@@ -17,6 +17,8 @@ def client(monkeypatch):
     import app.api.webhooks as webhooks
     import app.db as db_module
     import app.main
+    import app.search.factory as search_factory
+    from tests.conftest import FakeSearchProvider
 
     test_engine = create_engine(
         "sqlite:///./test_boli_routes.db", connect_args={"check_same_thread": False}
@@ -24,6 +26,11 @@ def client(monkeypatch):
     Base.metadata.create_all(test_engine)
     monkeypatch.setattr(db_module, "engine", test_engine)
     monkeypatch.setattr(webhooks, "engine", test_engine)
+    monkeypatch.setattr(
+        search_factory,
+        "build_search_provider",
+        lambda settings: FakeSearchProvider(),
+    )
     monkeypatch.setattr(
         webhooks,
         "settings",

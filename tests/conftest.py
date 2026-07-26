@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.integrations.sarvam import heuristic_extract_requirement
 from app.models import Base
-from app.search.mock import MockSearchProvider
+from app.schemas import SearchResult
 from app.services.orchestrator import ProcurementOrchestrator
 
 
@@ -35,6 +35,25 @@ class FakeSarvam:
 
     def transcribe_audio(self, audio: bytes, mime_type: str) -> str:
         raise RuntimeError("transcription not supported in tests")
+
+
+class FakeSearchProvider:
+    name = "test"
+
+    def search(self, query: str, limit: int) -> list[SearchResult]:
+        return [
+            SearchResult(
+                external_id=f"test-{i}",
+                name=f"Test Vendor {i + 1}",
+                address="Test Address",
+                phone=f"+91 90000 0000{i}",
+                rating=round(4.0 + i * 0.1, 1),
+                review_count=20 + i * 7,
+                source_url=None,
+                provider="test",
+            )
+            for i in range(min(limit, 5))
+        ]
 
 
 @pytest.fixture
@@ -70,7 +89,7 @@ def orchestrator(settings, whatsapp):
         settings,
         whatsapp,  # type: ignore[arg-type]
         FakeSarvam(),  # type: ignore[arg-type]
-        MockSearchProvider(),
+        FakeSearchProvider(),
     )
 
 

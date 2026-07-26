@@ -1,30 +1,20 @@
-from hashlib import sha256
-
 from app.schemas import SearchResult
 
 
 class MockSearchProvider:
+    """Returns an error when used in production.
+
+    For local development and tests, use a FakeSearchProvider that returns
+    test data directly. This provider exists so that operators see a clear
+    error when SEARCH_PROVIDER=mock is set in production instead of
+    silently getting fake vendor data.
+    """
+
     name = "mock"
 
     def search(self, query: str, limit: int) -> list[SearchResult]:
-        seed = sha256(query.encode("utf-8")).hexdigest()[:8]
-        names = [
-            "Aarav Business Services",
-            "Pragati Vendor Solutions",
-            "Shree Local Enterprises",
-            "Reliable Trade & Services",
-            "Citywide Commercial Works",
-        ]
-        return [
-            SearchResult(
-                external_id=f"mock-{seed}-{index}",
-                name=names[index],
-                address="Jaipur, Rajasthan",
-                phone=f"+91 90000 0000{index}",
-                rating=round(4.0 + index * 0.1, 1),
-                review_count=20 + index * 7,
-                source_url=None,
-                provider=self.name,
-            )
-            for index in range(min(limit, len(names)))
-        ]
+        raise RuntimeError(
+            "Search provider is set to 'mock'. No real vendor search will be performed. "
+            "Set SEARCH_PROVIDER=google_places and GOOGLE_PLACES_API_KEY in your "
+            "environment variables to enable live vendor search."
+        )
