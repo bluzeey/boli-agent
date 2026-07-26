@@ -118,8 +118,24 @@ def send_browser_chat_message(
 
     if created:
         processor = build_webhook_processor()
-        with Session(db_module.engine, expire_on_commit=False) as session:
-            processor.orchestrator.handle_text(session, sender, text)
+        try:
+            with Session(db_module.engine, expire_on_commit=False) as session:
+                processor.orchestrator.handle_text(session, sender, text)
+        except Exception as exc:
+            logger.exception(
+                "browser chat processing failed for sender=%s: %s", sender, exc
+            )
+            try:
+                processor.whatsapp.send_text(
+                    sender,
+                    "I could not process that message. Please rephrase and try again.",
+                )
+            except Exception:
+                logger.exception("browser chat failed to send fallback error reply")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Processing failed: {exc}",
+            ) from exc
 
     return _snapshot_for_session(sid)
 

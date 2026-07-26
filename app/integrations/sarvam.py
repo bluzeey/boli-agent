@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Any
 
@@ -6,6 +7,8 @@ import httpx
 
 from app.config import Settings
 from app.schemas import QuoteExtraction, RequirementExtraction
+
+logger = logging.getLogger(__name__)
 
 REQUIREMENT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -78,6 +81,15 @@ class SarvamClient:
     def __init__(self, settings: Settings, http_client: httpx.Client | None = None) -> None:
         self.settings = settings
         self.http = http_client or httpx.Client(timeout=60.0)
+
+    @staticmethod
+    def _parse_json_response(content: str) -> dict[str, Any]:
+        """Parse Sarvam's JSON response, stripping markdown code blocks if present."""
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
+            stripped = re.sub(r"\s*```$", "", stripped)
+        return json.loads(stripped)
 
     def transcribe_audio(self, audio: bytes, mime_type: str) -> str:
         if not self.settings.sarvam_api_key:
@@ -152,7 +164,16 @@ Search query must be suitable for vendor discovery and should contain the catego
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
-        return RequirementExtraction.model_validate(json.loads(content))
+        try:
+            parsed = self._parse_json_response(content)
+            return RequirementExtraction.model_validate(parsed)
+        except Exception as exc:
+            logger.warning(
+                "extract_requirement: failed to parse Sarvam response, "
+                "falling back to heuristic: %s",
+                exc,
+            )
+            return heuristic_extract_requirement(text, existing_case)
 
     def extract_quote(self, reply_text: str, required_fields: list[str]) -> QuoteExtraction:
         if not self.settings.sarvam_api_key:
@@ -197,7 +218,16 @@ Search query must be suitable for vendor discovery and should contain the catego
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
-        return QuoteExtraction.model_validate(json.loads(content))
+        try:
+            parsed = self._parse_json_response(content)
+            return QuoteExtraction.model_validate(parsed)
+        except Exception as exc:
+            logger.warning(
+                "extract_quote: failed to parse Sarvam response, "
+                "falling back to heuristic: %s",
+                exc,
+            )
+            return heuristic_extract_quote(reply_text, required_fields)
 
 
 def heuristic_extract_requirement(
