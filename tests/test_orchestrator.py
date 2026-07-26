@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.integrations.sarvam import heuristic_extract_requirement
 from app.models import Base
-from app.search.mock import MockSearchProvider
 from app.services.orchestrator import ProcurementOrchestrator
+from tests.conftest import FakeSearchProvider
 
 
 class FakeWhatsApp:
@@ -33,7 +33,7 @@ def test_orchestrator_searches_and_replies() -> None:
         settings,
         whatsapp,  # type: ignore[arg-type]
         FakeSarvam(),  # type: ignore[arg-type]
-        MockSearchProvider(),
+        FakeSearchProvider(),
     )
 
     with Session(engine, expire_on_commit=False) as session:

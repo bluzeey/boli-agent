@@ -16,7 +16,7 @@ def test_same_external_id_dedupes_vendor_across_cases(session, orchestrator, wha
     prepare_outreach(session, case_a, rfq_a)
 
     candidate = session.scalars(
-        select(Vendor).where(Vendor.external_id.like("mock-%"))
+        select(Vendor).where(Vendor.external_id.like("test-%"))
     ).first()
     assert candidate is not None
     assert candidate.contact_consent is True  # mock = pre-consented

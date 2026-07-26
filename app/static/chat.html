@@ -496,6 +496,7 @@ async function loadMessages() {
     const res = await fetch(`${API_BASE}/api/browser-chat/messages?session_id=${activeSessionId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (data.session_id !== activeSessionId) return;
     renderTranscript(data);
     maybeFetchCasePanel(data.active_case_id, data.case_status);
     pollFailCount = 0;

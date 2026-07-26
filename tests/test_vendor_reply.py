@@ -36,7 +36,7 @@ def test_vendor_reply_is_linked_and_parties_notified(session, orchestrator, what
     case = _drive_to_outreach(orchestrator, session)
 
     vendor = session.scalars(
-        select(Vendor).where(Vendor.external_id.like("mock-%"))
+        select(Vendor).where(Vendor.external_id.like("test-%"))
     ).first()
     assert vendor is not None
     sender_digits = normalize_phone(vendor.phone)
@@ -104,7 +104,7 @@ def test_status_command_reports_responded_count(session, orchestrator, whatsapp)
     processor = _processor(whatsapp, orchestrator)
 
     vendor = session.scalars(
-        select(Vendor).where(Vendor.external_id.like("mock-%"))
+        select(Vendor).where(Vendor.external_id.like("test-%"))
     ).first()
     # Vendor replies.
     processor.process(

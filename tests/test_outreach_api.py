@@ -29,7 +29,7 @@ def test_list_case_vendors_returns_outreach_status(session, orchestrator):
 def test_set_vendor_consent_grants_and_revokes(session, orchestrator):
     case = _prepared_case(session, orchestrator)
     vendor = session.scalars(
-        select(Vendor).where(Vendor.external_id.like("mock-%"))
+        select(Vendor).where(Vendor.external_id.like("test-%"))
     ).first()
 
     # Revoke consent.

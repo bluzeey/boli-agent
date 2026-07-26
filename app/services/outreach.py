@@ -42,7 +42,7 @@ class OutreachSummary:
 
 def _default_consent(provider: str) -> tuple[bool, str | None]:
     """Mock/test vendors are pre-consented; discovered vendors are cold."""
-    if provider == "mock":
+    if provider in ("mock", "test"):
         return True, ConsentSource.PRE_CONSENTED_TEST.value
     return False, None
 

@@ -37,7 +37,7 @@ def test_full_flow_search_to_document(session, orchestrator, whatsapp):
 
     # Vendor 1 replies with a complete quote (extracted via heuristic).
     vendor = session.scalars(
-        select(Vendor).where(Vendor.external_id.like("mock-%"))
+        select(Vendor).where(Vendor.external_id.like("test-%"))
     ).first()
     processor.process(
         session,
@@ -83,7 +83,7 @@ def test_compare_then_followup_for_missing_field(session, orchestrator, whatsapp
     orchestrator.handle_text(session, BUYER, "approve")
 
     vendor = session.scalars(
-        select(Vendor).where(Vendor.external_id.like("mock-%"))
+        select(Vendor).where(Vendor.external_id.like("test-%"))
     ).first()
     # Vendor replies with an incomplete quote (no tax/payment).
     processor.process(

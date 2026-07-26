@@ -20,7 +20,7 @@ def test_search_persists_candidates_with_positions(session, orchestrator):
 
     assert len(candidates) == 5
     assert [c.position for c in candidates] == [1, 2, 3, 4, 5]
-    assert all(c.external_id.startswith("mock-") for c in candidates)
+    assert all(c.external_id.startswith("test-") for c in candidates)
     assert all(c.expires_at is not None for c in candidates)
     assert all(c.selected_at is None for c in candidates)
     assert all(c.confirmed_at is None for c in candidates)

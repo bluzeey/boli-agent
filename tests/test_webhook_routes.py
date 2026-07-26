@@ -15,9 +15,9 @@ def client(monkeypatch):
     from fastapi.testclient import TestClient
 
     import app.api.webhooks as webhooks
+    import app.container as container
     import app.db as db_module
     import app.main
-    import app.search.factory as search_factory
     from tests.conftest import FakeSearchProvider
 
     test_engine = create_engine(
@@ -27,7 +27,7 @@ def client(monkeypatch):
     monkeypatch.setattr(db_module, "engine", test_engine)
     monkeypatch.setattr(webhooks, "engine", test_engine)
     monkeypatch.setattr(
-        search_factory,
+        container,
         "build_search_provider",
         lambda settings: FakeSearchProvider(),
     )
