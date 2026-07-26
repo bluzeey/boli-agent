@@ -29,20 +29,24 @@ A buyer sends a WhatsApp text or voice note. Boli:
    pre-consented; discovered vendors are cold and skipped until consent is
    granted), then moves to `collecting_responses`.
 9. When a vendor replies (text or voice note), Boli links it to the right case
-   and vendor, marks the vendor as *responded*, acknowledges the vendor, and
-   notifies the buyer.
+   and vendor, **extracts structured quote fields** (price, tax, lead time,
+   payment terms, exclusions), marks the vendor *responded*, acknowledges the
+   vendor, and notifies the buyer.
+10. The buyer can `compare` bids (a ranked WhatsApp table + a recommendation of
+    the lowest complete effective cost), `followup <n>` to request a missing
+    field, `select <n>` to pick a winner, and `approve` to generate a draft
+    purchase-order document.
 
 ### Current boundary (important)
 
-Boli captures vendor replies (raw text / transcript) and tracks who responded,
-but it does **not** yet:
+Boli extracts quotes, compares bids, recommends a winner, and drafts a purchase
+order. It does **not** yet:
 
-- Extract structured quote fields (price, tax, lead time, payment terms) from
-  replies — replies are stored verbatim.
-- Compare bids, detect exclusions, or recommend a winner.
-- Negotiate, sign, or commit spend.
-
-Those are subsequent milestones (quotation ingestion, bid comparison).
+- Extract quotes from PDF/image replies (text and voice replies are extracted;
+  media replies are captured but not parsed).
+- Present a web bid room (comparison is delivered on WhatsApp).
+- E-sign the document (it is a draft for human review/signature).
+- Track performance, invoices, or renewals.
 
 ---
 
@@ -109,18 +113,24 @@ Each step is a separate WhatsApp message from the buyer. With mock search,
 
 After outreach, the buyer can manage the case at `collecting_responses`:
 
-- `status` → shows how many RFQs were sent, how many vendors responded, and any
-  skipped/failed.
+- `status` → how many RFQs were sent, how many vendors responded, any skipped/failed.
+- `compare` → a ranked bid comparison table + a recommendation (lowest complete
+  effective cost; warns if the cheapest bid is incomplete).
+- `followup <n>` → sends one follow-up to vendor `n` asking for its missing
+  required field.
+- `select <n>` → picks vendor `n` as the winner → case moves to
+  `awaiting_approval`.
+- `approve` (after selecting) → generates a draft purchase-order document →
+  `document_ready`.
 - `consent 2` → grants buyer-confirmed consent to the vendor at original
   shortlist position 2 and re-queues it.
-- `resend` → re-runs outreach for any queued vendors (e.g. after granting
-  consent).
-- `new search` (or any new requirement explicitly) → closes the case and starts
-  fresh. Unrecognized text no longer silently closes the case — it replies with
-  a hint of available commands.
+- `resend` → re-runs outreach for any queued vendors.
+- `new search` → closes the case and starts fresh. Unrecognized text no longer
+  silently closes the case — it replies with a hint of available commands.
 
 When a vendor replies, the buyer is automatically notified ("Vendor X replied")
-and can reply `status` to see progress.
+and can reply `status` or `compare` to see progress. The draft document is also
+available via `GET /api/cases/{id}/document`.
 
 Other accepted replies:
 
@@ -381,7 +391,8 @@ All endpoints are prefixed with nothing (mounted at root). JSON in/out.
 | POST | `/api/cases/{id}/outreach` | Send the RFQ to consented vendors |
 | GET | `/api/cases/{id}/vendors` | List vendors with outreach status |
 | POST | `/api/cases/{id}/vendors/{vendor_id}/consent` | Grant/revoke vendor consent |
-| GET | `/api/cases/{id}/responses` | List per-vendor outreach status (queued/sent/failed/skipped) |
+| GET | `/api/cases/{id}/responses` | List per-vendor outreach status + extracted quote fields |
+| GET | `/api/cases/{id}/document` | Read the generated draft purchase-order document |
 
 ### Example: select vendors and generate an RFQ via the API
 

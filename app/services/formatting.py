@@ -130,5 +130,53 @@ def render_case_status(stats: dict) -> str:
 def render_collecting_hint() -> str:
     return (
         "I didn't recognise that. Reply *status* to see progress, *consent <number>* "
-        "to authorize a vendor, *resend* to re-send, or *new search* to start over."
+        "to authorize a vendor, *compare* to compare bids, *followup <number>* to "
+        "request a missing field, *resend* to re-send, or *new search* to start over."
     )
+
+
+def _format_money(amount: float | None) -> str:
+    return "n/a" if amount is None else f"Rs {amount:,.0f}"
+
+
+def render_comparison(comparison) -> str:
+    """Render a bid comparison table + recommendation for WhatsApp."""
+    lines = [f"*Bid comparison — case #{comparison.case_id}*"]
+    if not comparison.bids:
+        lines.append("No vendor responses to compare yet.")
+        return "\n".join(lines)
+
+    for bid in comparison.bids:
+        marker = "✅" if bid.complete else ("⏳" if bid.responded else "—")
+        cost = _format_money(bid.effective_cost)
+        tax = f" (+{bid.tax_pct:g}% tax)" if bid.tax_pct is not None else ""
+        lead = f", lead {bid.lead_time}" if bid.lead_time else ""
+        lines.append(f"{marker} {bid.position}. {bid.vendor_name} — {cost}{tax}{lead}")
+        if bid.exclusions:
+            lines.append(f"   ⚠️ Exclusions: {', '.join(bid.exclusions)}")
+        if bid.missing:
+            lines.append(f"   ⚠️ Missing: {', '.join(bid.missing)}")
+        if not bid.responded:
+            lines.append("   (no response yet)")
+
+    lines.append("")
+    if comparison.recommendation:
+        rec = comparison.recommendation
+        lines.append(
+            f"*Recommended: {rec.vendor_name} ({_format_money(rec.effective_cost)})*"
+        )
+    else:
+        lines.append(
+            "*No recommendation yet* — need at least one complete bid "
+            "(all required fields present)."
+        )
+
+    for warning in comparison.warnings:
+        lines.append(f"⚠️ {warning}")
+
+    lines.append("")
+    lines.append(
+        "Reply *select <number>* to choose a winner, *followup <number>* to request "
+        "a missing field, or *new search* to start over."
+    )
+    return "\n".join(lines)

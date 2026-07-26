@@ -41,26 +41,32 @@ The production vision extends the same case into vendor outreach, bid completion
 - Outreach-approval gate and per-vendor send/delivery status.
 - Inbound vendor-reply detection: vendor replies are linked to the right case
   and vendor, marked *responded*, with the buyer notified.
-- Buyer `status` command and a guard so unrecognized text at
-  `collecting_responses` no longer silently closes the case.
+- Structured quote-field extraction from vendor replies (price, tax, lead time,
+  payment terms, exclusions) via Sarvam, with a deterministic heuristic fallback.
+- Bid comparison + recommendation (lowest complete effective cost, exclusion
+  flags) delivered on WhatsApp.
+- Bid-completeness follow-ups and winner selection.
+- Draft purchase-order document generation on buyer approval.
+- Buyer `status` / `compare` / `select` / `followup` / `approve` commands and a
+  `collecting_responses` guard (unrecognized text no longer silently closes the case).
 - Celery/Redis worker path so the webhook can acknowledge quickly.
-- Read-only procurement-case API plus shortlist/RFQ endpoints.
+- Read-only procurement-case API plus shortlist/RFQ/document endpoints.
 - Docker Compose for API, worker, PostgreSQL, and Redis.
 - Alembic migrations.
 - Unit + route-level tests for signatures, payload parsing, requirement intake,
   formatting, selection, RFQ generation, the shortlist flow, outreach, vendor
-  replies, and both webhook routes.
+  replies, quote extraction, comparison, and both webhook routes.
 
 ## Current scope boundary
 
-The current product sends the RFQ to consented vendors and captures vendor
-replies (raw text / transcript, response status). It does **not** yet:
+The current product extracts vendor quotes, compares bids, recommends a winner,
+and drafts a purchase order. It does **not** yet:
 
-- Extract structured quote fields (price, tax, lead time) from vendor replies.
+- Extract quotes from PDF/image replies (text and voice replies are extracted).
+- Present a web bid room (comparison is delivered on WhatsApp).
+- E-sign the document (it is a draft for human review/signature).
 - Claim that a search result is qualified.
-- Compare bids, detect exclusions, or recommend a final vendor.
-- Negotiate prices or terms.
-- Sign or create a legally binding agreement.
+- Negotiate prices or terms, or track performance/renewals.
 - Persist Google Places content as a permanent vendor database.
 
 ## Local setup
@@ -215,7 +221,8 @@ The adapter uses Google Places Text Search (New) with a field mask. Google Place
 | POST | `/api/cases/{case_id}/outreach` | Send the RFQ to consented vendors |
 | GET | `/api/cases/{case_id}/vendors` | List vendors with outreach status |
 | POST | `/api/cases/{case_id}/vendors/{vendor_id}/consent` | Grant/revoke vendor consent |
-| GET | `/api/cases/{case_id}/responses` | List per-vendor outreach status |
+| GET | `/api/cases/{case_id}/responses` | List per-vendor outreach status + extracted quote fields |
+| GET | `/api/cases/{case_id}/document` | Read the generated draft purchase-order document |
 
 See `USER_GUIDE.md` for the full setup, credentials checklist, and end-to-end
 examples.
@@ -241,13 +248,14 @@ IDEA_SCOPE.md            Product and demo scope lock
 
 ## Next milestone
 
-Quotation ingestion. The current milestone ends at `collecting_responses` — the
-RFQ has been sent to consented vendors. The next milestone:
+The procurement loop now runs end-to-end on WhatsApp (search → RFQ → outreach →
+quote extraction → comparison → recommendation → draft PO document). Remaining
+work that needs "way more":
 
-1. Receive vendor responses in text, voice, PDF, and image.
-2. Link each response to the correct case and vendor.
-3. Extract generic commercial fields with evidence references.
-4. Mark fields sourced, inferred, missing, or contradicted.
+1. PDF/image quotation ingestion (OCR/vision extraction).
+2. An internal React bid-room web view.
+3. E-sign integration so the draft document can be executed.
+4. Vendor performance, invoice reconciliation, and renewal memory.
 
 See `USER_GUIDE.md` for the credentials and setup, and `IMPLEMENTATION_PLAN.md`
-Milestone 5 for the full build tasks.
+for the full roadmap.

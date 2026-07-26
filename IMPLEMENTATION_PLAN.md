@@ -568,6 +568,13 @@ One text response, one voice note, and one PDF appear in the same canonical bid 
 
 Text and PDF only.
 
+### Status
+
+Partially implemented. Vendor text and voice-note replies are linked to the
+correct case/vendor and extracted into a canonical quote schema (price, tax,
+lead time, payment terms, exclusions) via Sarvam with a heuristic fallback.
+PDF/image ingestion (OCR/vision) and page-level evidence are deferred.
+
 ---
 
 ## Milestone 6 — Bid completeness engine
@@ -588,6 +595,13 @@ Three incomplete quotations become comparable bids or are clearly marked incompl
 ### If behind, cut to
 
 Display missing fields and let the buyer manually request clarification.
+
+### Status
+
+Implemented (manual). Bid completeness is calculated against the category pack's
+required fields, and a `followup <n>` command sends one follow-up at a time to a
+vendor for its missing field. Auto-scheduled follow-up loops with deadlines are
+deferred.
 
 ---
 
@@ -610,6 +624,13 @@ The system identifies a hidden exclusion in the cheapest bid and explains why an
 ### If behind, cut to
 
 WhatsApp summary plus downloadable comparison table.
+
+### Status
+
+Implemented (WhatsApp). Bids are normalized, effective cost computed
+(price + tax), ranked, exclusions flagged, and a recommendation (lowest
+complete effective cost) produced — delivered as a WhatsApp table via `compare`.
+The internal React bid-room web view is deferred.
 
 ---
 
@@ -635,6 +656,13 @@ Editable DOCX draft with no e-sign.
 ### Legal boundary
 
 The system drafts and routes. Humans approve and sign. High-value or unusual terms should be escalated for legal review.
+
+### Status
+
+Partially implemented. Winner selection (`select <n>`) and draft purchase-order
+generation on `approve` are done (text document, served via
+`GET /api/cases/{id}/document`). Approver identity/authority checks, DOCX/PDF
+output, non-standard-term highlighting, and e-sign are deferred.
 
 ---
 
@@ -903,8 +931,15 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 - Inbound vendor-reply detection: replies are linked to the correct case and
   vendor (status `responded`, `raw_reply`, `responded_at`), the vendor is
   acknowledged, and the buyer is notified.
-- Buyer `status` command and a `collecting_responses` guard (unrecognized text
-  no longer silently closes the case).
+- Structured quote-field extraction from vendor replies (Sarvam + heuristic
+  fallback): price, tax, unit_price, lead_time, payment_terms, exclusions.
+- Bid completeness checks and one-at-a-time `followup <n>` follow-ups.
+- Bid comparison + recommendation (lowest complete effective cost, exclusion
+  flags) delivered on WhatsApp via `compare`.
+- Winner selection (`select <n>`) and draft purchase-order document generation
+  on `approve` (text, served via `GET /api/cases/{id}/document`).
+- Buyer `status` / `compare` / `select` / `followup` / `approve` commands and a
+  `collecting_responses` guard (unrecognized text no longer silently closes the case).
 - Category-pack contract, registry, and generic pack stub.
 - REST endpoints for cases, candidates, shortlist, RFQ, vendors, consent,
   outreach, and responses.
@@ -923,11 +958,14 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 
 ### Next implementation unit
 
-Quotation ingestion (Milestone 5, structured extraction). Vendor replies are
-already captured (raw text / transcript, response status). The next step is to
-extract structured commercial fields (price, tax, lead time, payment terms)
-from those replies with evidence references, and mark fields
-sourced/inferred/missing/contradicted.
+The WhatsApp procurement loop now runs end-to-end (search → RFQ → outreach →
+quote extraction → comparison → recommendation → draft PO document). The
+remaining work that needs "way more":
+
+- PDF/image quotation ingestion (OCR/vision extraction).
+- Internal React bid-room web view.
+- E-sign integration so the draft document can be executed.
+- Vendor performance, invoice reconciliation, and renewal memory (Milestone 10).
 
 ## 20. Next actions in order
 

@@ -358,3 +358,22 @@ def list_case_responses(
         .order_by(VendorResponse.created_at.asc())
     ).all()
     return [VendorResponseRead.model_validate(r) for r in responses]
+
+
+@router.get("/{case_id}/document")
+def get_case_document(
+    case_id: str, session: Session = Depends(get_session)
+) -> dict:
+    procurement_case = _get_case_or_404(session, case_id)
+    if not procurement_case.document_text:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No document has been generated for this case yet. "
+            "Select a vendor and approve outreach to generate a draft.",
+        )
+    return {
+        "case_id": case_id,
+        "status": procurement_case.status,
+        "selected_vendor_id": procurement_case.selected_vendor_id,
+        "document": procurement_case.document_text,
+    }

@@ -28,6 +28,11 @@ class FakeSarvam:
     def extract_requirement(self, text: str, existing_case: dict | None = None):
         return heuristic_extract_requirement(text, existing_case)
 
+    def extract_quote(self, reply_text: str, required_fields: list[str]):
+        from app.integrations.sarvam import heuristic_extract_quote
+
+        return heuristic_extract_quote(reply_text, required_fields)
+
     def transcribe_audio(self, audio: bytes, mime_type: str) -> str:
         raise RuntimeError("transcription not supported in tests")
 

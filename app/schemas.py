@@ -21,6 +21,19 @@ class RequirementExtraction(BaseModel):
     clarifying_question: str | None = None
 
 
+class QuoteExtraction(BaseModel):
+    """Structured commercial fields extracted from a vendor's reply."""
+
+    price: str | None = None
+    tax: str | None = None
+    unit_price: str | None = None
+    lead_time: str | None = None
+    payment_terms: str | None = None
+    exclusions: list[str] = Field(default_factory=list)
+    notes: str | None = None
+    missing: list[str] = Field(default_factory=list)
+
+
 class SearchResult(BaseModel):
     external_id: str
     name: str
@@ -146,6 +159,8 @@ class VendorResponseRead(BaseModel):
     responded_at: datetime | None = None
     raw_reply: str | None = None
     reply_message_id: str | None = None
+    extracted_fields: dict = Field(default_factory=dict)
+    extraction_status: str = "pending"
     attempts: int = 0
     last_error: str | None = None
 

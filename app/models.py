@@ -39,6 +39,8 @@ class CaseStatus(StrEnum):
     OUTREACH_APPROVED = "outreach_approved"
     OUTREACH_IN_PROGRESS = "outreach_in_progress"
     COLLECTING_RESPONSES = "collecting_responses"
+    AWAITING_APPROVAL = "awaiting_approval"
+    DOCUMENT_READY = "document_ready"
     FAILED = "failed"
     CLOSED = "closed"
 
@@ -55,6 +57,13 @@ class RfqStatus(StrEnum):
     SHOWN = "shown"
     APPROVED = "approved"
     SUPERSEDED = "superseded"
+
+
+class ExtractionStatus(StrEnum):
+    PENDING = "pending"
+    EXTRACTED = "extracted"
+    NO_REPLY = "no_reply"
+    FAILED = "failed"
 
 
 class VendorResponseStatus(StrEnum):
@@ -112,6 +121,8 @@ class ProcurementCase(Base):
     missing_fields: Mapped[list[str]] = mapped_column(JSON, default=list)
     search_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_clarifying_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_vendor_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    document_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -231,8 +242,8 @@ class VendorResponse(Base):
 
     Outreach states (queued/sent/delivered/failed/skipped_cold) are populated by
     the outreach service. Inbound vendor replies are linked here (status
-    RESPONDED, responded_at, raw_reply). Structured quote-field extraction and
-    response-deadline expiry are deferred to Milestone 5.
+    RESPONDED, responded_at, raw_reply) and structured commercial fields are
+    extracted into ``extracted_fields``. Response-deadline expiry is deferred.
     """
 
     __tablename__ = "vendor_responses"
@@ -257,6 +268,10 @@ class VendorResponse(Base):
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
     reply_message_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    extracted_fields: Mapped[dict] = mapped_column(JSON, default=dict)
+    extraction_status: Mapped[str] = mapped_column(
+        String(32), default=ExtractionStatus.PENDING.value
+    )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

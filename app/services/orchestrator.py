@@ -23,9 +23,13 @@ from app.models import (
 )
 from app.schemas import SearchResult
 from app.search.base import SearchProvider
+from app.services.comparison import build_comparison
+from app.services.completeness import missing_required_fields, render_followup_question
+from app.services.documents import generate_document
 from app.services.formatting import (
     render_case_status,
     render_collecting_hint,
+    render_comparison,
     render_outreach_approved,
     render_outreach_summary,
     render_search_results,
@@ -50,6 +54,8 @@ _SHORTLIST_STATES = {
     CaseStatus.RFQ_READY.value,
     CaseStatus.OUTREACH_APPROVED.value,
     CaseStatus.COLLECTING_RESPONSES.value,
+    CaseStatus.AWAITING_APPROVAL.value,
+    CaseStatus.DOCUMENT_READY.value,
 }
 
 
@@ -199,6 +205,8 @@ class ProcurementOrchestrator:
         if status in {
             CaseStatus.COLLECTING_RESPONSES.value,
             CaseStatus.OUTREACH_APPROVED.value,
+            CaseStatus.AWAITING_APPROVAL.value,
+            CaseStatus.DOCUMENT_READY.value,
         }:
             return self._handle_collecting_responses(session, sender, text, active_case)
         return None
@@ -366,15 +374,29 @@ class ProcurementOrchestrator:
             self.whatsapp.send_text(sender, render_case_status(stats))
             return active_case
 
+        if normalized == "compare":
+            comparison = build_comparison(session, active_case)
+            self.whatsapp.send_text(sender, render_comparison(comparison))
+            return active_case
+
+        if normalized.startswith("select "):
+            return self._handle_select(session, sender, normalized, active_case)
+
+        if normalized.startswith("followup "):
+            return self._handle_followup(session, sender, normalized, active_case)
+
+        if normalized == "approve":
+            return self._handle_document_approval(session, sender, active_case)
+
         if normalized.startswith("consent "):
             rest = normalized[len("consent ") :]
-            positions = parse_selection(rest, 1_000_000)
-            if not positions:
+            result = parse_selection(rest, 1_000_000)
+            if not result.positions:
                 self.whatsapp.send_text(
                     sender, "Reply *consent <number>* using the original shortlist position."
                 )
                 return active_case
-            granted = self._grant_consent(session, active_case.id, positions)
+            granted = self._grant_consent(session, active_case.id, result.positions)
             self.whatsapp.send_text(
                 sender,
                 f"Consent recorded for {granted} vendor(s). Reply *resend* to send the RFQ "
@@ -397,6 +419,131 @@ class ProcurementOrchestrator:
         # Unrecognized text: keep the case open and hint at available commands
         # rather than silently closing it and starting a new procurement case.
         self.whatsapp.send_text(sender, render_collecting_hint())
+        return active_case
+
+    def _vendor_response_for_position(
+        self, session: Session, case_id: str, position: int
+    ) -> tuple[Vendor, VendorResponse] | None:
+        candidate = session.scalars(
+            select(VendorCandidate).where(
+                VendorCandidate.case_id == case_id,
+                VendorCandidate.position == position,
+            )
+        ).first()
+        if not candidate:
+            return None
+        vendor = session.scalars(
+            select(Vendor).where(Vendor.external_id == candidate.external_id)
+        ).first()
+        if not vendor:
+            return None
+        response = session.scalars(
+            select(VendorResponse)
+            .where(
+                VendorResponse.case_id == case_id,
+                VendorResponse.vendor_id == vendor.id,
+            )
+            .order_by(VendorResponse.created_at.desc())
+        ).first()
+        if not response:
+            return None
+        return vendor, response
+
+    def _handle_select(
+        self, session: Session, sender: str, normalized: str, active_case: ProcurementCase
+    ) -> ProcurementCase:
+        result = parse_selection(normalized[len("select ") :], 1_000_000)
+        if not result.positions:
+            self.whatsapp.send_text(
+                sender, "Reply *select <number>* with the vendor's shortlist position."
+            )
+            return active_case
+        position = result.positions[0]
+        match = self._vendor_response_for_position(session, active_case.id, position)
+        if not match:
+            self.whatsapp.send_text(
+                sender, f"No vendor at position {position}. Reply *compare* to see bids."
+            )
+            return active_case
+        vendor, _response = match
+        active_case.selected_vendor_id = vendor.id
+        active_case.status = CaseStatus.AWAITING_APPROVAL.value
+        active_case.updated_at = utcnow()
+        session.add(active_case)
+        session.commit()
+        self.whatsapp.send_text(
+            sender,
+            f"Selected *{vendor.name}*. Reply *approve* to generate the purchase-order "
+            "draft, or *compare* to review again.",
+        )
+        return active_case
+
+    def _handle_followup(
+        self, session: Session, sender: str, normalized: str, active_case: ProcurementCase
+    ) -> ProcurementCase:
+        result = parse_selection(normalized[len("followup ") :], 1_000_000)
+        if not result.positions:
+            self.whatsapp.send_text(
+                sender, "Reply *followup <number>* with the vendor's shortlist position."
+            )
+            return active_case
+        position = result.positions[0]
+        match = self._vendor_response_for_position(session, active_case.id, position)
+        if not match:
+            self.whatsapp.send_text(sender, f"No vendor at position {position}.")
+            return active_case
+        vendor, response = match
+        if not vendor.phone:
+            self.whatsapp.send_text(
+                sender, f"{vendor.name} has no phone number on file for a follow-up."
+            )
+            return active_case
+        missing = missing_required_fields(response, active_case.category or "generic")
+        if not missing:
+            self.whatsapp.send_text(sender, f"{vendor.name}'s quotation is already complete.")
+            return active_case
+        self.whatsapp.send_text(vendor.phone, render_followup_question(vendor.name, missing))
+        self.whatsapp.send_text(
+            sender, f"Follow-up sent to {vendor.name} for: {', '.join(missing)}."
+        )
+        return active_case
+
+    def _handle_document_approval(
+        self, session: Session, sender: str, active_case: ProcurementCase
+    ) -> ProcurementCase:
+        if not active_case.selected_vendor_id:
+            self.whatsapp.send_text(
+                sender,
+                "Select a vendor first with *select <number>*, then reply *approve* "
+                "to generate the draft.",
+            )
+            return active_case
+        comparison = build_comparison(session, active_case)
+        bid = next(
+            (b for b in comparison.bids if b.vendor_id == active_case.selected_vendor_id),
+            None,
+        )
+        if bid is None:
+            self.whatsapp.send_text(
+                sender, "Could not find the selected vendor's bid. Reply *compare*."
+            )
+            return active_case
+        vendor = session.scalars(
+            select(Vendor).where(Vendor.id == active_case.selected_vendor_id)
+        ).first()
+        rfq = latest_rfq(session, active_case.id)
+        document = generate_document(active_case, bid, vendor, rfq)
+        active_case.document_text = document
+        active_case.status = CaseStatus.DOCUMENT_READY.value
+        active_case.updated_at = utcnow()
+        session.add(active_case)
+        session.commit()
+        self.whatsapp.send_text(sender, document)
+        self.whatsapp.send_text(
+            sender,
+            "📄 Draft generated. This is pending human review and signature. "
+            "Reply *new search* to start over.",
+        )
         return active_case
 
     def _case_status_stats(self, session: Session, case_id: str) -> dict:

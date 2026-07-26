@@ -21,6 +21,7 @@ from app.services.formatting import (
     render_vendor_replied,
 )
 from app.services.orchestrator import ProcurementOrchestrator
+from app.services.quote import extract_response_quote
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,8 @@ class WhatsAppWebhookProcessor:
         response.responded_at = now
         response.raw_reply = text
         response.reply_message_id = incoming.message_id
+        # Extract structured commercial fields from the reply (text/transcript).
+        extract_response_quote(self.sarvam, response, case.category or "generic")
         response.updated_at = now
         session.add(response)
 
