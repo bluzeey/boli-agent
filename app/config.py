@@ -1,7 +1,20 @@
+import logging
 from functools import lru_cache
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("boli.config")
+
+
+def _redact_url(url: str) -> str:
+    """Return *url* with any credentials masked, keeping scheme + host visible."""
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    if "@" in rest:
+        return f"{scheme}://***@{rest.split('@', 1)[1]}"
+    return f"{scheme}://{rest}"
 
 
 class Settings(BaseSettings):
@@ -68,4 +81,26 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    logger.info("settings loaded: app_env=%s log_level=%s", s.app_env, s.log_level)
+    logger.info("settings: database_url=%s", _redact_url(s.database_url))
+    logger.info("settings: redis_url=%s", _redact_url(s.redis_url))
+    logger.info(
+        "settings: whatsapp_provider=%s process_inline=%s search_provider=%s",
+        s.whatsapp_provider,
+        s.process_inline,
+        s.search_provider,
+    )
+    logger.info("settings: app_base_url=%s", s.app_base_url or "(not set)")
+    logger.info(
+        "settings: twilio_account_sid=%s twilio_whatsapp_from=%s twilio_auth_token=%s",
+        "set" if s.twilio_account_sid else "(not set)",
+        s.twilio_whatsapp_from or "(not set)",
+        "set" if s.twilio_auth_token else "(not set)",
+    )
+    logger.info(
+        "settings: sarvam_api_key=%s whatsapp_access_token=%s",
+        "set" if s.sarvam_api_key else "(not set)",
+        "set" if s.whatsapp_access_token else "(not set)",
+    )
+    return s

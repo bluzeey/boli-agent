@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 meta_router = APIRouter(prefix="/webhooks/whatsapp", tags=["whatsapp"])
 twilio_router = APIRouter(prefix="/webhooks/twilio", tags=["whatsapp"])
 settings = get_settings()
+logger.info(
+    "webhooks: routes registered (meta=/webhooks/whatsapp, "
+    "twilio=/webhooks/twilio/whatsapp, provider=%s)",
+    settings.whatsapp_provider,
+)
 
 
 def _process_messages(messages: list) -> None:
