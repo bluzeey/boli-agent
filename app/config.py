@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +43,22 @@ class Settings(BaseSettings):
     outreach_channel: str = "whatsapp"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize_database_url(cls, value: str) -> str:
+        """Rewrite bare ``postgresql://`` / ``postgres://`` to the psycopg3 dialect.
+
+        Railway's Postgres plugin sets ``DATABASE_URL=postgresql://...`` which
+        SQLAlchemy resolves to the psycopg2 dialect; only psycopg3
+        (``psycopg[binary]``) is installed, so we force ``postgresql+psycopg://``.
+        ``sqlite://`` and explicit ``postgresql+psycopg://`` URLs are unchanged.
+        """
+        if value.startswith("postgres://"):
+            return "postgresql+psycopg://" + value[len("postgres://") :]
+        if value.startswith("postgresql://") and not value.startswith("postgresql+"):
+            return "postgresql+psycopg://" + value[len("postgresql://") :]
+        return value
 
     @property
     def whatsapp_graph_base_url(self) -> str:
