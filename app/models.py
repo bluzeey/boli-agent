@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -268,9 +268,9 @@ class VendorResponse(Base):
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
     reply_message_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    extracted_fields: Mapped[dict] = mapped_column(JSON, default=dict)
+    extracted_fields: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
     extraction_status: Mapped[str] = mapped_column(
-        String(32), default=ExtractionStatus.PENDING.value
+        String(32), default=ExtractionStatus.PENDING.value, server_default="pending"
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

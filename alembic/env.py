@@ -1,25 +1,30 @@
+import logging
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 from alembic import context
-from app.config import get_settings
+from app.config import _redact_url, get_settings
 from app.models import Base
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+
+logging.getLogger("boli").setLevel(logging.INFO)
 
 target_metadata = Base.metadata
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
+logger = logging.getLogger("boli.alembic")
+logger.info("alembic: database_url=%s", _redact_url(settings.database_url))
 
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = config.get_main_option("sqlalchemy.url")
+    url = settings.database_url
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -33,13 +38,17 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    """Run migrations in 'online' mode.
 
+    We pass ``settings.database_url`` directly to ``create_engine`` instead of
+    going through ``engine_from_config``/``ConfigParser.set_main_option`` to
+    avoid ConfigParser's ``%`` interpolation, which crashes when the database
+    URL contains percent-encoded characters (common in Railway Postgres
+    passwords).
+    """
+    connectable = create_engine(settings.database_url, poolclass=pool.NullPool)
+
+    logger.info("alembic: connecting to database for online migration")
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
@@ -49,6 +58,7 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+    logger.info("alembic: online migration complete")
 
 
 if context.is_offline_mode():

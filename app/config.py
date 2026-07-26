@@ -1,4 +1,5 @@
 import logging
+import os
 from functools import lru_cache
 
 from pydantic import field_validator
@@ -92,6 +93,7 @@ def get_settings() -> Settings:
         s.search_provider,
     )
     logger.info("settings: app_base_url=%s", s.app_base_url or "(not set)")
+    logger.info("settings: PORT env=%s", os.environ.get("PORT", "(not set)"))
     logger.info(
         "settings: twilio_account_sid=%s twilio_whatsapp_from=%s twilio_auth_token=%s",
         "set" if s.twilio_account_sid else "(not set)",
