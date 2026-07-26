@@ -2,8 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import Base
 from app.integrations.sarvam import heuristic_extract_requirement
+from app.models import Base
 from app.search.mock import MockSearchProvider
 from app.services.orchestrator import ProcurementOrchestrator
 

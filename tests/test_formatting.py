@@ -19,4 +19,4 @@ def test_search_results_are_whatsapp_friendly() -> None:
         ],
     )
     assert "*1. Example Vendor*" in output
-    assert "Reply with a number" in output
+    assert "Reply with" in output

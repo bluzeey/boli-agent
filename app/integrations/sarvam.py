@@ -6,7 +6,6 @@ import httpx
 from app.config import Settings
 from app.schemas import RequirementExtraction
 
-
 REQUIREMENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

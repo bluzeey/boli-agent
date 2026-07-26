@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     max_message_chars: int = 4_000
     google_result_cache_minutes: int = 30
 
+    # Controlled vendor outreach
+    allow_outreach: bool = True
+    outbound_rate_delay_seconds: float = 2.0
+    max_outreach_per_batch: int = 20
+    outreach_channel: str = "whatsapp"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

@@ -484,6 +484,13 @@ One numbered selection and no multi-command parser.
 
 Verify provider-specific caching, attribution, and display requirements before persisting any provider content.
 
+### Status
+
+Partially implemented. Numbered selection (`1, 3, 4`), `new search`, shortlist
+confirmation, transient candidate persistence with expiry, and source/uncertainty
+labels are done. The `more`, `widen`, `change city`, and `exclude` refinement
+commands are deferred to a later refinement milestone.
+
 ---
 
 ## Milestone 3 — Company profile and procurement memory
@@ -529,6 +536,13 @@ Generate RFQ text and manually copy it to vendors.
 ### Safety gate
 
 Do not enable autonomous cold outreach until messaging consent, template, rate, and anti-spam controls are reviewed.
+
+### Status
+
+Partially implemented. Versioned RFQ generation from the canonical case, buyer
+confirmation, and the outreach-approval gate (`outreach_approved`) are done.
+The vendor-contact queue, WhatsApp/email outreach, delivery/response tracking,
+and opt-out/suppression controls are not yet built — no vendor is contacted.
 
 ---
 
@@ -875,8 +889,16 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 - Google Places adapter.
 - Mock search.
 - WhatsApp result formatting.
+- Transient vendor-candidate persistence with position and expiry.
+- Buyer shortlist selection over WhatsApp (`1, 3, 4` style).
+- Shortlist confirmation and clearing.
+- Canonical, versioned RFQ generation (generic category pack).
+- Outreach-approval gate (`outreach_approved`) — no vendor contacted.
+- Category-pack contract, registry, and generic pack stub.
+- REST endpoints for cases, candidates, shortlist, RFQ, and approval.
 - Celery worker.
 - Docker Compose.
+- Alembic migrations.
 - Unit tests.
 
 ### Requires credentials and live verification
@@ -889,7 +911,9 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 
 ### Next implementation unit
 
-Search refinement and buyer shortlist selection through WhatsApp.
+Controlled vendor outreach, beginning at `outreach_approved`. Add a
+vendor-contact queue with consent, template, rate, and anti-spam controls,
+then send the approved RFQ to the selected vendor leads.
 
 ## 20. Next actions in order
 
@@ -899,5 +923,6 @@ Search refinement and buyer shortlist selection through WhatsApp.
 4. Verify text intake with mock search.
 5. Add Sarvam key and verify a sub-30-second Hindi/Hinglish voice note.
 6. Add Google Places key and verify a Jaipur local-business search.
-7. Save transient result references and implement numbered shortlist selection.
-8. Add the first category pack and RFQ generator.
+7. ~~Save transient result references and implement numbered shortlist selection.~~ Done.
+8. Add the first real category pack (e.g. pest_control) with required/comparison fields and risk rules, and wire it into RFQ generation.
+9. Implement controlled vendor outreach beginning at `outreach_approved`.

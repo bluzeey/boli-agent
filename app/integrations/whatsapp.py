@@ -50,7 +50,11 @@ def extract_inbound_messages(payload: dict[str, Any]) -> list[InboundWhatsAppMes
                     mime_type = media.get("mime_type")
                 elif message_type == "interactive":
                     interactive = message.get("interactive") or {}
-                    selected = interactive.get("button_reply") or interactive.get("list_reply") or {}
+                    selected = (
+                        interactive.get("button_reply")
+                        or interactive.get("list_reply")
+                        or {}
+                    )
                     text = selected.get("title") or selected.get("id")
 
                 message_id = message.get("id")

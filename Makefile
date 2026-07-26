@@ -1,4 +1,4 @@
-.PHONY: install dev test lint up down worker
+.PHONY: install dev test lint up down worker migrate
 
 install:
 	python -m pip install -e '.[dev]'
@@ -14,6 +14,9 @@ test:
 
 lint:
 	ruff check app tests
+
+migrate:
+	alembic upgrade head
 
 up:
 	docker compose up --build
