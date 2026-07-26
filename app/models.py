@@ -122,7 +122,9 @@ class ChatMessage(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     transport: Mapped[str] = mapped_column(String(32), default=ChatTransport.BROWSER.value)
     client_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
 
 
 class ProcurementCase(Base):

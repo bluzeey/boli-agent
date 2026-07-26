@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 import app.db as db_module
 from app.container import build_webhook_processor
-from app.models import Conversation, ProcurementCase
+from app.models import Conversation
 from app.schemas import BrowserChatMessageSend, BrowserChatTranscriptRead
 from app.services.chat_transcript import (
     BROWSER_CHAT_COOKIE,
@@ -91,7 +91,7 @@ def send_browser_chat_message(
             try:
                 processor.whatsapp.send_text(
                     sender,
-                    "I could not process that message. Please resend it as a shorter text or voice note.",
+                    "I could not process that message. Please resend it as a shorter text"
                 )
             except Exception:
                 logger.exception("browser chat failed to send fallback error reply")

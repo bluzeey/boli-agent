@@ -3,7 +3,13 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ChatMessage, ChatMessageDirection, ChatTransport, Conversation, ProcurementCase
+from app.models import (
+    ChatMessage,
+    ChatMessageDirection,
+    ChatTransport,
+    Conversation,
+    ProcurementCase,
+)
 
 BROWSER_CHAT_COOKIE = "browser_chat_session"
 BROWSER_SENDER_PREFIX = "browser:"
