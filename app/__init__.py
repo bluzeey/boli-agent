@@ -5,8 +5,10 @@ module-level boot diagnostics appear in the container logs.
 """
 import logging
 import os
+import sys
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
 )

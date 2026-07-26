@@ -46,8 +46,14 @@ def run_migrations_online() -> None:
     URL contains percent-encoded characters (common in Railway Postgres
     passwords).
     """
-    connectable = create_engine(settings.database_url, poolclass=pool.NullPool)
+    connect_args = (
+        {} if settings.database_url.startswith("sqlite") else {"connect_timeout": 10}
+    )
+    connectable = create_engine(
+        settings.database_url, poolclass=pool.NullPool, connect_args=connect_args
+    )
 
+    print("[alembic] connecting to database...", flush=True)
     logger.info("alembic: connecting to database for online migration")
     with connectable.connect() as connection:
         context.configure(
@@ -58,6 +64,7 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+    print("[alembic] migration complete", flush=True)
     logger.info("alembic: online migration complete")
 
 

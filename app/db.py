@@ -10,7 +10,11 @@ from app.models import Base
 logger = logging.getLogger("boli.db")
 
 settings = get_settings()
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+connect_args = (
+    {"check_same_thread": False}
+    if settings.database_url.startswith("sqlite")
+    else {"connect_timeout": 10}
+)
 logger.info("db: creating engine for %s (pool_pre_ping=True)", _redact_url(settings.database_url))
 engine = create_engine(
     settings.database_url, echo=False, pool_pre_ping=True, connect_args=connect_args
