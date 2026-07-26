@@ -4,7 +4,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "echo '[deploy] step 1/2: alembic upgrade head' && (alembic upgrade head 2>&1 || true) && echo '[deploy] step 2/2: starting gunicorn on port ${PORT:-8000}' && gunicorn app.main:app --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 600 --access-logfile - --error-logfile - --log-level info -k uvicorn.workers.UvicornWorker"
+startCommand = "echo '[deploy] step 1/2: running migrations' && (python -m alembic upgrade head 2>&1 || true) && echo '[deploy] step 2/2: starting gunicorn on port ${PORT:-8000}' && gunicorn app.main:app --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 600 --access-logfile - --error-logfile - --log-level info -k uvicorn.workers.UvicornWorker"
 healthcheckPath = "/health"
 healthcheckTimeout = 120
 healthcheckInterval = 15
