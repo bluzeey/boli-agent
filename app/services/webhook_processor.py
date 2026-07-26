@@ -50,13 +50,24 @@ class WhatsAppWebhookProcessor:
 
     def process(self, session: Session, messages: list[InboundWhatsAppMessage]) -> int:
         processed = 0
+        logger.info("processor: starting to process %d message(s)", len(messages))
         for incoming in messages:
+            logger.info(
+                "processor: message_id=%s sender=%s type=%s text=%s",
+                incoming.message_id,
+                incoming.sender,
+                incoming.message_type,
+                (incoming.text[:200] + "...")
+                if incoming.text and len(incoming.text) > 200
+                else incoming.text,
+            )
             duplicate = session.scalars(
                 select(InboundMessage).where(
                     InboundMessage.wa_message_id == incoming.message_id
                 )
             ).first()
             if duplicate:
+                logger.info("processor: duplicate message_id=%s, skipping", incoming.message_id)
                 continue
 
             record = InboundMessage(
@@ -69,27 +80,49 @@ class WhatsAppWebhookProcessor:
             )
             session.add(record)
             session.commit()
+            logger.info("processor: persisted inbound record id=%s", record.id)
 
             try:
                 self.whatsapp.mark_read(incoming.message_id)
                 text = incoming.text
                 if incoming.message_type == "audio" and incoming.media_id:
+                    logger.info("processor: downloading audio media_id=%s", incoming.media_id)
                     audio, mime_type = self.whatsapp.download_media(incoming.media_id)
+                    logger.info(
+                        "processor: transcribing audio (%d bytes, %s)",
+                        len(audio),
+                        mime_type,
+                    )
                     text = self.sarvam.transcribe_audio(audio, mime_type)
                     record.text = text
+                    logger.info(
+                        "processor: transcription complete: %s",
+                        text[:200] if text else "(empty)",
+                    )
 
-                # Vendor replies are captured before the buyer message-type guard so
-                # that media/voice replies from vendors are linked, not rejected.
                 vendor_match = self._find_vendor_response(session, incoming.sender)
                 if vendor_match:
                     response, vendor, case = vendor_match
+                    logger.info(
+                        "processor: vendor reply detected — vendor=%s case_id=%s",
+                        vendor.name,
+                        case.id,
+                    )
                     self._handle_vendor_reply(
                         session, record, incoming, text, response, vendor, case
                     )
                     processed += 1
+                    logger.info(
+                        "processor: vendor reply handled for message_id=%s",
+                        incoming.message_id,
+                    )
                     continue
 
                 if incoming.message_type not in {"text", "interactive"}:
+                    logger.info(
+                        "processor: non-text message type=%s, asking for text",
+                        incoming.message_type,
+                    )
                     self.whatsapp.send_text(
                         incoming.sender,
                         "For this MVP, send your requirement as text or a voice note.",
@@ -104,6 +137,11 @@ class WhatsAppWebhookProcessor:
                 if not text:
                     raise ValueError("Inbound message had no usable text")
 
+                logger.info(
+                    "processor: dispatching to orchestrator: sender=%s text=%s",
+                    incoming.sender,
+                    text[:200],
+                )
                 procurement_case = self.orchestrator.handle_text(
                     session, incoming.sender, text
                 )
@@ -113,8 +151,17 @@ class WhatsAppWebhookProcessor:
                 session.add(record)
                 session.commit()
                 processed += 1
+                logger.info(
+                    "processor: orchestrator complete — case_id=%s status=%s",
+                    procurement_case.id,
+                    procurement_case.status,
+                )
             except Exception as exc:
-                logger.exception("Failed to process WhatsApp message %s", incoming.message_id)
+                logger.exception(
+                    "processor: FAILED to process message_id=%s: %s",
+                    incoming.message_id,
+                    exc,
+                )
                 record.status = MessageStatus.FAILED.value
                 record.error = str(exc)
                 record.processed_at = utcnow()
@@ -127,7 +174,8 @@ class WhatsAppWebhookProcessor:
                         "or voice note.",
                     )
                 except Exception:
-                    logger.exception("Failed to send error message to WhatsApp")
+                    logger.exception("processor: failed to send error message to WhatsApp")
+        logger.info("processor: finished — %d/%d message(s) processed", processed, len(messages))
         return processed
 
     def _find_vendor_response(
