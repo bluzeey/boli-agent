@@ -88,6 +88,16 @@ class OutreachChannel(StrEnum):
     EMAIL = "email"
 
 
+class ChatMessageDirection(StrEnum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+
+class ChatTransport(StrEnum):
+    BROWSER = "browser"
+    WHATSAPP = "whatsapp"
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -96,6 +106,23 @@ class Conversation(Base):
     preferred_language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    conversation_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("conversations.id"), index=True
+    )
+    direction: Mapped[str] = mapped_column(
+        String(16), default=ChatMessageDirection.INBOUND.value, index=True
+    )
+    sender: Mapped[str] = mapped_column(String(128), index=True)
+    body: Mapped[str] = mapped_column(Text, default="")
+    transport: Mapped[str] = mapped_column(String(32), default=ChatTransport.BROWSER.value)
+    client_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class ProcurementCase(Base):

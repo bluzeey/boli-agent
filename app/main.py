@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI
 
+from app.api.browser_chat import router as browser_chat_router
 from app.api.cases import router as cases_router
 from app.api.health import router as health_router
 from app.api.webhooks import meta_router, twilio_router
@@ -24,4 +25,6 @@ app.include_router(twilio_router)
 logger.info("boot: included twilio_router (/webhooks/twilio/whatsapp)")
 app.include_router(cases_router)
 logger.info("boot: included cases_router")
+app.include_router(browser_chat_router)
+logger.info("boot: included browser_chat_router (/chat)")
 logger.info("boot: application ready — %d routes registered", len(app.routes))

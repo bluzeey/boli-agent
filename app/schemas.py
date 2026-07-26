@@ -187,3 +187,28 @@ class OutreachSummaryRead(BaseModel):
     sent: int
     failed: int
     skipped_cold: int
+
+
+class BrowserChatMessageSend(BaseModel):
+    text: str
+    client_message_id: str | None = None
+
+
+class BrowserChatMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    direction: str
+    sender: str
+    body: str
+    transport: str
+    created_at: datetime
+
+
+class BrowserChatTranscriptRead(BaseModel):
+    session_id: str
+    sender: str
+    conversation_id: str | None = None
+    active_case_id: str | None = None
+    case_status: str | None = None
+    messages: list[BrowserChatMessageRead] = Field(default_factory=list)

@@ -1,4 +1,5 @@
 from app.config import Settings, get_settings
+from app.integrations.hybrid_whatsapp import HybridWhatsAppClient
 from app.integrations.sarvam import SarvamClient
 from app.integrations.whatsapp import WhatsAppClient
 from app.search.factory import build_search_provider
@@ -12,8 +13,8 @@ def build_whatsapp_client(settings: Settings | None = None) -> WhatsAppClient:
     if settings.whatsapp_provider == "twilio":
         from app.integrations.twilio import TwilioWhatsAppClient
 
-        return TwilioWhatsAppClient(settings)  # type: ignore[return-value]
-    return WhatsAppClient(settings)
+        return HybridWhatsAppClient(TwilioWhatsAppClient(settings))  # type: ignore[return-value]
+    return HybridWhatsAppClient(WhatsAppClient(settings))  # type: ignore[return-value]
 
 
 def build_webhook_processor(settings: Settings | None = None) -> WhatsAppWebhookProcessor:
