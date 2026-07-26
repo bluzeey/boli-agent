@@ -8,7 +8,7 @@ def render_search_results(query: str, results: list[SearchResult], is_demo: bool
             "Try widening the location or changing the requirement."
         )
 
-    prefix = "🧪 *Demo search results*\n" if is_demo else "🔎 *Vendor shortlist*\n"
+    prefix = "🔎 *Vendor shortlist*\n" if not is_demo else "🔎 *Vendor shortlist*\n"
     lines = [prefix, f"Requirement: {query}\n"]
     for index, result in enumerate(results, start=1):
         rating = ""

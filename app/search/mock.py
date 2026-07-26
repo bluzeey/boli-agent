@@ -8,7 +8,7 @@ class MockSearchProvider:
 
     def search(self, query: str, limit: int) -> list[SearchResult]:
         seed = sha256(query.encode("utf-8")).hexdigest()[:8]
-        generic = [
+        names = [
             "Aarav Business Services",
             "Pragati Vendor Solutions",
             "Shree Local Enterprises",
@@ -18,13 +18,13 @@ class MockSearchProvider:
         return [
             SearchResult(
                 external_id=f"mock-{seed}-{index}",
-                name=name,
-                address=f"Demo address {index + 1}",
+                name=names[index],
+                address="Jaipur, Rajasthan",
                 phone=f"+91 90000 0000{index}",
                 rating=round(4.0 + index * 0.1, 1),
                 review_count=20 + index * 7,
                 source_url=None,
                 provider=self.name,
             )
-            for index, name in enumerate(generic[:limit])
+            for index in range(min(limit, len(names)))
         ]
