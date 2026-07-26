@@ -47,7 +47,11 @@ def session(engine):
 
 @pytest.fixture
 def settings():
-    return Settings(search_provider="mock", search_result_limit=5)
+    return Settings(
+        search_provider="mock",
+        search_result_limit=5,
+        outbound_rate_delay_seconds=0.0,
+    )
 
 
 @pytest.fixture

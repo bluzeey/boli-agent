@@ -49,7 +49,7 @@ def render_outreach_approved(rfq) -> str:
 def render_outreach_summary(summary) -> str:
     """Report outreach results to the buyer."""
     lines = [
-        f"📨 *Outreach complete* — case now collecting responses.",
+        "📨 *Outreach complete* — case now collecting responses.",
         f"Vendors contacted: {summary.sent}",
     ]
     if summary.skipped_cold:

@@ -13,7 +13,9 @@ numbered shortlist → buyer selection → RFQ generation → outreach-approval 
 
 A buyer sends a WhatsApp text or voice note. Boli:
 
-1. Verifies the Meta webhook and deduplicates inbound messages.
+1. Receives the message via a WhatsApp provider webhook — **Twilio Sandbox**
+   (default, for prototyping) or the Meta Cloud API — with signature validation
+   and deduplication.
 2. Transcribes voice notes with Sarvam (text is used directly).
 3. Extracts a structured procurement requirement.
 4. Asks one clarifying question if the location is missing.
@@ -22,19 +24,20 @@ A buyer sends a WhatsApp text or voice note. Boli:
 6. Accepts a reply like `1, 3, 4`, echoes the selected vendors, and asks for
    confirmation.
 7. On confirmation, generates a **canonical, versioned RFQ** and shows it.
-8. Asks the buyer to approve outreach. On approval, the case reaches
-   `outreach_approved` — a hard gate.
+8. Asks the buyer to approve outreach. On approval, Boli sends the RFQ to the
+   selected vendor leads that have **contact consent** (mock/test vendors are
+   pre-consented; discovered vendors are cold and skipped until consent is
+   granted), then moves to `collecting_responses`.
 
 ### Current boundary (important)
 
-At `outreach_approved` Boli **stops**. It does **not** yet:
+After outreach, Boli **stops at `collecting_responses`**. It does **not** yet:
 
-- Send any message to a vendor. No vendor is ever contacted in this milestone.
-- Collect quotations, compare bids, or recommend a winner.
+- Ingest or parse vendor quotations (text, voice, PDF, image).
+- Compare bids, detect exclusions, or recommend a winner.
 - Negotiate, sign, or commit spend.
 
-Those are subsequent milestones. The outreach-approval gate is the hand-off
-point for the next milestone (controlled vendor outreach).
+Those are subsequent milestones (quotation ingestion, bid comparison).
 
 ---
 
@@ -42,7 +45,9 @@ point for the next milestone (controlled vendor outreach).
 
 - Python 3.11+ (3.12 used in Docker).
 - A terminal with `make`, or run the commands manually.
-- For real WhatsApp/Sarvam/Google: accounts and API keys (see Section 5).
+- For real WhatsApp/Sarvam/Google: accounts and API keys (see Section 5). The
+  default prototype path uses the **Twilio Sandbox**; the Meta Cloud API is an
+  alternate for production.
 - For the quick local mock path: nothing except Python.
 
 ---
@@ -50,12 +55,12 @@ point for the next milestone (controlled vendor outreach).
 ## 3. Quick start — local mock flow (no credentials)
 
 This runs end-to-end with a fake search provider and dry-run WhatsApp output.
-No Meta, Sarvam, Google, Redis, or Postgres credentials are required.
+No Twilio, Sarvam, Google, Redis, or Postgres credentials are required.
 
 ```bash
 # 1. Create environment
 cp .env.example .env
-# Keep defaults: PROCESS_INLINE=true, SEARCH_PROVIDER=mock
+# Keep defaults: WHATSAPP_PROVIDER=twilio, PROCESS_INLINE=true, SEARCH_PROVIDER=mock
 
 # 2. Install (creates a venv)
 python3 -m venv .venv
@@ -70,16 +75,18 @@ make migrate
 make dev            # uvicorn app.main:app --reload
 ```
 
-In another terminal, simulate an inbound WhatsApp webhook:
+In another terminal, simulate an inbound **Twilio** WhatsApp webhook (the
+default provider). Twilio posts form-encoded data:
 
 ```bash
-curl -X POST http://localhost:8000/webhooks/whatsapp \
-  -H 'Content-Type: application/json' \
-  --data @scripts/sample_webhook.json
+curl -X POST http://localhost:8000/webhooks/twilio/whatsapp \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data 'MessageSid=demo-001&From=whatsapp%3A%2B919999999999&Body=Find+pest+control+vendors+in+Jaipur&NumMedia=0'
 ```
 
 You will see the dry-run WhatsApp reply (a 5-vendor numbered shortlist) printed
-in the API terminal.
+in the API terminal. (The Meta Cloud API route at `/webhooks/whatsapp` is also
+available if you set `WHATSAPP_PROVIDER=meta`.)
 
 ---
 
@@ -93,7 +100,15 @@ Each step is a separate WhatsApp message from the buyer. With mock search,
 | `Find commercial pest control vendors in Jaipur` | Numbered shortlist (5 vendors) | `shortlist_ready` |
 | `1, 3` | Echo of vendors 1 & 3 + "reply yes/no" | `awaiting_shortlist_confirmation` |
 | `yes` | The canonical RFQ + "reply approve to authorize outreach" | `rfq_ready` |
-| `approve` | "Outreach approved — no vendors contacted yet" | `outreach_approved` |
+| `approve` | "Outreach approved" + sends RFQ to consented vendors + summary | `collecting_responses` |
+
+After outreach, the buyer can manage cold vendors at `collecting_responses`:
+
+- `consent 2` → grants buyer-confirmed consent to the vendor at original
+  shortlist position 2 and re-queues it.
+- `resend` → re-runs outreach for any queued vendors (e.g. after granting
+  consent).
+- `new search` (or any new requirement) → closes the case and starts fresh.
 
 Other accepted replies:
 
@@ -113,39 +128,55 @@ Other accepted replies:
 
 Set these in `.env` (copy from `.env.example`).
 
-### 5.1 Meta WhatsApp Cloud API
+### 5.1 Twilio WhatsApp Sandbox (default, recommended for prototyping)
 
-Boli receives messages via webhook and sends replies via the phone-number
-`/messages` endpoint.
+Twilio Sandbox lets you test the full WhatsApp flow without registering a
+production WhatsApp sender or completing the Meta onboarding. Boli receives
+messages via a Twilio webhook and sends replies via the Twilio REST API.
 
-1. Create a Meta app with a **WhatsApp Business Account** and a phone number.
-2. Set the webhook callback URL to a public HTTPS endpoint:
+```env
+WHATSAPP_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=<your-twilio-auth-token>
+TWILIO_WHATSAPP_FROM=+14155238886
+APP_BASE_URL=https://YOUR_NGROK_URL.ngrok-free.app
+```
 
+Setup steps:
+
+1. **Activate the Sandbox** in Twilio: Messaging → Try it out → Send a WhatsApp
+   message → Activate. Twilio shows a shared WhatsApp number and a join code
+   (e.g. `join example-word`). Send that join code from your personal WhatsApp
+   number. Each tester must join before the bot can message them.
+2. **Configure the project** with the env vars above. The Sandbox number may
+   differ — use the exact number shown in your Twilio console.
+3. **Expose your local server** with a tunnel:
+   ```bash
+   ngrok http 8000
    ```
-   https://YOUR_HOST/webhooks/whatsapp
-   ```
-
-   During development use a tunnel (e.g. `ngrok http 8000` or a Cloudflare
-   tunnel) to expose `localhost:8000`.
-
-3. In the Meta dashboard, subscribe the app to the `messages` webhook field.
-4. Configure these env vars (use the same verify token in Meta and in `.env`):
-
-   ```env
-   WHATSAPP_VERIFY_TOKEN=<your-choose-a-token>
-   WHATSAPP_ACCESS_TOKEN=<permanent-or-temporary-token>
-   WHATSAPP_APP_SECRET=<app-secret-for-signature-check>
-   WHATSAPP_PHONE_NUMBER_ID=<phone-number-id>
-   WHATSAPP_GRAPH_VERSION=v20.0
-   ```
+   Set `APP_BASE_URL` to the ngrok HTTPS URL (Twilio signs the full URL it posts
+   to, so this must match).
+4. **Add the webhook** in the Twilio Sandbox settings: set
+   "When a message comes in" to
+   `https://YOUR_NGROK_URL.ngrok-free.app/webhooks/twilio/whatsapp`, HTTP POST,
+   and save.
+5. **Test the chat**: from your joined WhatsApp number, send
+   `Find packaging vendors in Jaipur`. With `SEARCH_PROVIDER=mock` you get an
+   immediate sample shortlist; switch to `google_places` for live search.
 
 Notes:
 
-- `WHATSAPP_APP_SECRET` is required to validate the `x-hub-signature-256`
-  header. If it is empty, signature validation is skipped (dev convenience —
-  never leave it empty in production).
-- When `WHATSAPP_ACCESS_TOKEN` or `WHATSAPP_PHONE_NUMBER_ID` are empty, Boli
-  runs in **dry-run mode**: outbound messages are logged instead of sent.
+- `TWILIO_AUTH_TOKEN` is required to validate the `X-Twilio-Signature` header.
+  If it is empty, signature validation is skipped (dev convenience — never leave
+  it empty in production).
+- When `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_WHATSAPP_FROM` are
+  empty, Boli runs in **dry-run mode**: outbound messages are logged instead of
+  sent.
+- **Sandbox limitations**: every tester must join via the code; joined sessions
+  expire periodically; it uses a shared Twilio number; outside the 24-hour
+  user-initiated messaging window, outbound messages require approved templates.
+  This is adequate for the hackathon. Move to the direct Meta Cloud API
+  (Section 5.5) only when the procurement workflow is production-ready.
 
 ### 5.2 Sarvam (speech-to-text + structured extraction)
 
@@ -177,11 +208,77 @@ SEARCH_RESULT_LIMIT=5
   with an expiry (`GOOGLE_RESULT_CACHE_MINUTES`, default 30).
 - Leave `SEARCH_PROVIDER=mock` for local demos with no key.
 
+### 5.4 Vendor outreach (consent, channels, rate limits)
+
+Outreach is the controlled path from RFQ approval to vendors receiving the RFQ.
+It is gated by **per-vendor consent** plus a global kill-switch.
+
+**Consent model (the primary safety gate):**
+
+- Each durable `Vendor` record has `contact_consent`. A vendor is contacted
+  only if consent is `true`, `opted_out` is `false`, and its phone/email is not
+  on the suppression list.
+- Mock/test vendors are pre-consented (`pre_consented_test`) so the dev and
+  acceptance flow sends to them immediately.
+- Vendors discovered via Google Places are **cold** (`contact_consent=false`)
+  and are **never contacted automatically**. They are recorded as
+  `skipped_cold`. Grant consent via WhatsApp (`consent <position>`) or the API,
+  then `resend`.
+- Consent persists across cases (a vendor contacted in one case is recognised
+  in the next, deduped by external ID / Place ID).
+
+**Global kill-switch:**
+
+```env
+ALLOW_OUTREACH=true        # set false to disable all sends instantly
+OUTBOUND_RATE_DELAY_SECONDS=2.0
+MAX_OUTREACH_PER_BATCH=20
+OUTREACH_CHANNEL=whatsapp
+```
+
+**Channels:** WhatsApp sends via the Meta Cloud API (dry-run logged when
+`WHATSAPP_ACCESS_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID` are empty). Email is wired as
+a stub interface only — real SMTP sending is a later addition.
+
+**Vendor-facing message:** the RFQ sent to vendors is *different* from the
+buyer-facing preview. It is a polite outbound request ("A buyer would like to
+request a quotation…") with the requirement, deadline, and the quote fields to
+include.
+
+**WhatsApp policy note (real deployment):** Meta requires an approved message
+template to message a number outside the 24-hour customer-service window, and
+cold marketing messages are against policy. Boli enforces consent in code, but
+the operator is responsible for ensuring vendors have opted in and that an
+approved template is used where required. Keep `ALLOW_OUTREACH=false` until
+messaging consent, template, rate, and anti-spam controls have been reviewed.
+
+### 5.5 Meta WhatsApp Cloud API (production alternate)
+
+The direct Meta integration is preserved for production use once you outgrow
+the Twilio Sandbox. Set `WHATSAPP_PROVIDER=meta` and configure:
+
+```env
+WHATSAPP_PROVIDER=meta
+WHATSAPP_VERIFY_TOKEN=<your-choose-a-token>
+WHATSAPP_ACCESS_TOKEN=<permanent-or-temporary-token>
+WHATSAPP_APP_SECRET=<app-secret-for-signature-check>
+WHATSAPP_PHONE_NUMBER_ID=<phone-number-id>
+WHATSAPP_GRAPH_VERSION=v20.0
+```
+
+- Webhook URL: `https://YOUR_HOST/webhooks/whatsapp` (Meta route).
+- Subscribe the app to the `messages` webhook field in the Meta dashboard.
+- `WHATSAPP_APP_SECRET` validates the `x-hub-signature-256` header (skipped if
+  empty). Empty access token / phone-number ID → dry-run mode.
+- These Meta env vars are intentionally omitted from `.env.example`; add them
+  only when switching to the Meta provider.
+
 ---
 
 ## 6. Database and migrations
 
 Boli supports SQLite (dev) and PostgreSQL (Docker/production).
+
 
 ### Dev (SQLite)
 
@@ -268,7 +365,11 @@ All endpoints are prefixed with nothing (mounted at root). JSON in/out.
 | POST | `/api/cases/{id}/shortlist` | Record a buyer selection |
 | POST | `/api/cases/{id}/rfq` | Generate (or regenerate) the RFQ |
 | GET | `/api/cases/{id}/rfq` | Read the latest RFQ |
-| POST | `/api/cases/{id}/rfq/approve` | Approve outreach (the gate) |
+| POST | `/api/cases/{id}/rfq/approve` | Approve the RFQ and prepare outreach (queued) |
+| POST | `/api/cases/{id}/outreach` | Send the RFQ to consented vendors |
+| GET | `/api/cases/{id}/vendors` | List vendors with outreach status |
+| POST | `/api/cases/{id}/vendors/{vendor_id}/consent` | Grant/revoke vendor consent |
+| GET | `/api/cases/{id}/responses` | List per-vendor outreach status (queued/sent/failed/skipped) |
 
 ### Example: select vendors and generate an RFQ via the API
 
@@ -283,43 +384,53 @@ curl -X POST http://localhost:8000/api/cases/<CASE_ID>/shortlist \
 # 2. Generate the RFQ from the selection
 curl -X POST http://localhost:8000/api/cases/<CASE_ID>/rfq
 
-# 3. Read the generated RFQ
-curl http://localhost:8000/api/cases/<CASE_ID>/rfq
-
-# 4. Approve outreach (reaches outreach_approved; no vendor is contacted)
+# 3. Approve the RFQ and prepare outreach (vendors + queued responses)
 curl -X POST http://localhost:8000/api/cases/<CASE_ID>/rfq/approve
+
+# 4. Send the RFQ to consented vendors
+curl -X POST http://localhost:8000/api/cases/<CASE_ID>/outreach
+
+# 5. (Optional) grant consent to a cold vendor, then re-send
+curl -X POST http://localhost:8000/api/cases/<CASE_ID>/vendors/<VENDOR_ID>/consent \
+  -H 'Content-Type: application/json' \
+  -d '{"consent": true, "source": "buyer_confirmed"}'
+curl -X POST http://localhost:8000/api/cases/<CASE_ID>/outreach
 ```
 
-### Example: list candidates
+### Example: inspect outreach status
 
 ```bash
-curl http://localhost:8000/api/cases/<CASE_ID>/candidates
-```
+# Per-vendor outreach status
+curl http://localhost:8000/api/cases/<CASE_ID>/vendors
 
-Response fields: `position`, `name`, `phone`, `address`, `rating`,
-`review_count`, `source_url`, `selected`, `confirmed`, `expired`.
+# Detailed per-vendor response rows (sent_at, status, last_error)
+curl http://localhost:8000/api/cases/<CASE_ID>/responses
+```
 
 ---
 
 ## 9. Simulating the full multi-turn flow locally
 
-This script sends four simulated WhatsApp messages and prints the case status.
-Requires `PROCESS_INLINE=true` and `SEARCH_PROVIDER=mock`.
+This script sends four simulated **Twilio** WhatsApp messages and prints the
+case status. Requires `PROCESS_INLINE=true` and `SEARCH_PROVIDER=mock`.
 
 ```bash
 python3 - <<'PY'
-import json, urllib.request
+import urllib.parse, urllib.request
 
 BASE = "http://localhost:8000"
-SENDER = "919999999999"
 
-def send(msg_id, body):
-    payload = {"entry":[{"id":"1","changes":[{"value":{"messages":[
-        {"id":msg_id,"from":SENDER,"type":"text","text":{"body":body}}]}}]}]}
+def send(msg_sid, body):
+    form = urllib.parse.urlencode({
+        "MessageSid": msg_sid,
+        "From": "whatsapp:+919999999999",
+        "Body": body,
+        "NumMedia": "0",
+    })
     req = urllib.request.Request(
-        f"{BASE}/webhooks/whatsapp",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"})
+        f"{BASE}/webhooks/twilio/whatsapp",
+        data=form.encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
     urllib.request.urlopen(req).read()
 
 send("w1", "Find commercial pest control vendors in Jaipur")
@@ -347,6 +458,10 @@ All values are in `.env` (see `.env.example`). Key options:
 | `GOOGLE_RESULT_CACHE_MINUTES` | `30` | Transient candidate expiry (data-policy) |
 | `MAX_MESSAGE_CHARS` | `4000` | Outbound WhatsApp message truncation |
 | `MAX_AUDIO_BYTES` | `12000000` | Voice-note download size cap |
+| `ALLOW_OUTREACH` | `true` | Global outreach kill-switch (per-vendor consent is the primary gate) |
+| `OUTBOUND_RATE_DELAY_SECONDS` | `2.0` | Delay between outbound sends (rate limiting) |
+| `MAX_OUTREACH_PER_BATCH` | `20` | Max sends per outreach run |
+| `OUTREACH_CHANNEL` | `whatsapp` | Outbound channel (email is a stub) |
 | `DATABASE_URL` | `sqlite:///./boli.db` | SQLAlchemy URL |
 | `REDIS_URL` | `redis://localhost:6379/0` | Celery broker/backend |
 
@@ -373,13 +488,22 @@ All values are in `.env` (see `.env.example`). Key options:
 
 ## 12. What to connect — checklist
 
-- [ ] Meta WhatsApp Business app + phone number (webhook, verify token, access
-      token, app secret, phone number ID, graph version).
-- [ ] Public HTTPS endpoint for the webhook (tunnel in dev).
-- [ ] Sarvam API key (STT + structured chat).
+**Prototype (Twilio Sandbox):**
+
+- [ ] Twilio account + activated WhatsApp Sandbox (join code for each tester).
+- [ ] `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` in `.env`.
+- [ ] Public HTTPS endpoint for the webhook (ngrok in dev); set `APP_BASE_URL`.
+- [ ] Twilio Sandbox webhook → `https://YOUR_HOST/webhooks/twilio/whatsapp` (POST).
+- [ ] Sarvam API key (STT + structured chat) — optional, heuristic fallback works without it.
 - [ ] Google Places API key + enable Places API (New) — only for real search.
-- [ ] PostgreSQL + Redis (for Docker / production) — or SQLite for dev.
 - [ ] Run `make migrate` against the persistent database.
 
-After these are connected, the flow in Section 4 works end-to-end on real
-WhatsApp, up to (but not including) vendor outreach.
+**Production (later):**
+
+- [ ] Switch `WHATSAPP_PROVIDER=meta`; add the Meta Cloud API env vars (Section 5.5).
+- [ ] Meta WhatsApp Business app + phone number (webhook, verify token, access
+      token, app secret, phone number ID, graph version).
+- [ ] PostgreSQL + Redis (for Docker / production) — or SQLite for dev.
+
+After the prototype items are connected, the flow in Section 4 works
+end-to-end on real WhatsApp via the Sandbox, including vendor outreach.

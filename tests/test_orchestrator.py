@@ -25,7 +25,9 @@ class FakeSarvam:
 def test_orchestrator_searches_and_replies() -> None:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
-    settings = Settings(search_provider="mock", search_result_limit=3)
+    settings = Settings(
+        search_provider="mock", search_result_limit=3, outbound_rate_delay_seconds=0.0
+    )
     whatsapp = FakeWhatsApp()
     orchestrator = ProcurementOrchestrator(
         settings,

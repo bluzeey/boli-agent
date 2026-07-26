@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from app.api.cases import router as cases_router
 from app.api.health import router as health_router
-from app.api.webhooks import router as webhooks_router
+from app.api.webhooks import meta_router, twilio_router
 from app.config import get_settings
 from app.db import init_db
 
@@ -29,5 +29,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(health_router)
-app.include_router(webhooks_router)
+app.include_router(meta_router)
+app.include_router(twilio_router)
 app.include_router(cases_router)

@@ -148,12 +148,6 @@ def send_outreach(
     if not procurement_case:
         raise ValueError(f"Case {case_id} not found")
 
-    rfq = session.scalars(
-        select(Rfq)
-        .where(Rfq.case_id == case_id)
-        .order_by(Rfq.version.desc())
-    ).first()
-
     responses = list(
         session.scalars(
             select(VendorResponse)

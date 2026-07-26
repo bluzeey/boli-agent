@@ -14,21 +14,28 @@ celery_app.conf.update(
 
 
 @celery_app.task(
-    name="process_whatsapp_payload",
+    name="process_inbound",
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_jitter=True,
     max_retries=4,
 )
-def process_whatsapp_payload(payload: dict) -> int:
+def process_inbound(messages: list[dict]) -> int:
+    """Process a list of inbound WhatsApp messages (provider-agnostic).
+
+    Each item is the dict form of ``InboundWhatsAppMessage``. Used by both the
+    Meta and Twilio webhook routes when ``PROCESS_INLINE=false``.
+    """
     from sqlalchemy.orm import Session
 
     from app.container import build_webhook_processor
     from app.db import engine
+    from app.integrations.whatsapp import InboundWhatsAppMessage
 
     processor = build_webhook_processor()
+    inbound = [InboundWhatsAppMessage(**m) for m in messages]
     with Session(engine) as session:
-        return processor.process(session, payload)
+        return processor.process(session, inbound)
 
 
 @celery_app.task(

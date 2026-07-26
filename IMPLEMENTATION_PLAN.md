@@ -539,10 +539,13 @@ Do not enable autonomous cold outreach until messaging consent, template, rate, 
 
 ### Status
 
-Partially implemented. Versioned RFQ generation from the canonical case, buyer
-confirmation, and the outreach-approval gate (`outreach_approved`) are done.
-The vendor-contact queue, WhatsApp/email outreach, delivery/response tracking,
-and opt-out/suppression controls are not yet built — no vendor is contacted.
+Implemented. Versioned RFQ generation, buyer confirmation, the
+outreach-approval gate, a vendor-contact queue with consent/suppression/rate
+controls, WhatsApp sends to consented vendors, and per-vendor
+send/delivery status tracking are done. Mock/test vendors are pre-consented;
+discovered (cold) vendors default to `contact_consent=false` and are skipped
+until the buyer grants consent. Email outreach is a stub interface (real SMTP is
+a later addition). Inbound vendor-response *content* ingestion is Milestone 5.
 
 ---
 
@@ -879,7 +882,8 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 - Project scaffold.
 - FastAPI service.
 - SQL models.
-- WhatsApp verification and signature validation.
+- WhatsApp verification and signature validation (Meta Cloud API and Twilio
+  Sandbox providers, selectable via `WHATSAPP_PROVIDER`).
 - Text and audio payload parsing.
 - Media download.
 - Sarvam STT client.
@@ -893,10 +897,13 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 - Buyer shortlist selection over WhatsApp (`1, 3, 4` style).
 - Shortlist confirmation and clearing.
 - Canonical, versioned RFQ generation (generic category pack).
-- Outreach-approval gate (`outreach_approved`) — no vendor contacted.
+- Outreach-approval gate and controlled vendor outreach: durable `Vendor`
+  records with consent/suppression, rate-limited WhatsApp sends to consented
+  vendors, vendor-facing RFQ message, and per-vendor send/delivery status.
 - Category-pack contract, registry, and generic pack stub.
-- REST endpoints for cases, candidates, shortlist, RFQ, and approval.
-- Celery worker.
+- REST endpoints for cases, candidates, shortlist, RFQ, vendors, consent,
+  outreach, and responses.
+- Celery worker (message processing + a dedicated `send_outreach` task).
 - Docker Compose.
 - Alembic migrations.
 - Unit tests.
@@ -911,9 +918,10 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 
 ### Next implementation unit
 
-Controlled vendor outreach, beginning at `outreach_approved`. Add a
-vendor-contact queue with consent, template, rate, and anti-spam controls,
-then send the approved RFQ to the selected vendor leads.
+Quotation ingestion (Milestone 5). Receive vendor responses in text, voice,
+PDF, and image; link each to the correct case and vendor; extract generic
+commercial fields with evidence references; mark fields
+sourced/inferred/missing/contradicted.
 
 ## 20. Next actions in order
 
@@ -924,5 +932,7 @@ then send the approved RFQ to the selected vendor leads.
 5. Add Sarvam key and verify a sub-30-second Hindi/Hinglish voice note.
 6. Add Google Places key and verify a Jaipur local-business search.
 7. ~~Save transient result references and implement numbered shortlist selection.~~ Done.
-8. Add the first real category pack (e.g. pest_control) with required/comparison fields and risk rules, and wire it into RFQ generation.
-9. Implement controlled vendor outreach beginning at `outreach_approved`.
+8. ~~Add the first category pack and RFQ generator.~~ Generic pack + RFQ done.
+9. ~~Controlled vendor outreach beginning at `outreach_approved`.~~ Done.
+10. Quotation ingestion: receive vendor text/voice/PDF/image responses and
+    extract generic commercial fields with evidence references.

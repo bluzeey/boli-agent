@@ -47,14 +47,23 @@ def test_full_shortlist_to_outreach_approval_flow(session, orchestrator, whatsap
     ]
     assert len(confirmed) == 2
 
-    # 4. Buyer approves outreach -> terminal gate reached.
+    # 4. Buyer approves outreach -> RFQ sent to the two selected (pre-consented) vendors.
     case = orchestrator.handle_text(session, BUYER, "approve")
-    assert case.status == "outreach_approved"
+    assert case.status == "collecting_responses"
 
     session.refresh(rfq)
     assert rfq.status == "approved"
 
-    # No message was ever sent to any vendor number — only to the buyer.
-    assert all(to == BUYER for to, _ in whatsapp.messages), (
-        "No vendor should have been contacted in this milestone."
-    )
+    # The two selected mock vendors received the vendor-facing RFQ.
+    vendor_phones = {"+91 90000 00000", "+91 90000 00002"}
+    sent_to_vendors = {to for to, _ in whatsapp.messages if to in vendor_phones}
+    assert sent_to_vendors == vendor_phones, "Both selected vendors should have been contacted."
+
+    # Each vendor message contains the requirement and response instructions.
+    for to, body in whatsapp.messages:
+        if to in vendor_phones:
+            assert "pest control" in body.lower()
+            assert "Please respond with" in body
+
+    # The buyer received an outreach summary.
+    assert any("Outreach complete" in body for _, body in whatsapp.messages)

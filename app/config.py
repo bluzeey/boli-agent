@@ -11,11 +11,16 @@ class Settings(BaseSettings):
     process_inline: bool = True
     log_level: str = "INFO"
 
+    whatsapp_provider: str = "twilio"
     whatsapp_verify_token: str = "change-me"
     whatsapp_access_token: str = ""
     whatsapp_app_secret: str = ""
     whatsapp_phone_number_id: str = ""
     whatsapp_graph_version: str = ""
+
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_whatsapp_from: str = ""
 
     sarvam_api_key: str = ""
     sarvam_chat_model: str = "sarvam-105b"

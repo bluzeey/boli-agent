@@ -1,12 +1,11 @@
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.integrations.sarvam import SarvamClient
-from app.integrations.whatsapp import WhatsAppClient, extract_inbound_messages
+from app.integrations.whatsapp import InboundWhatsAppMessage, WhatsAppClient
 from app.models import InboundMessage, MessageStatus
 from app.services.orchestrator import ProcurementOrchestrator
 
@@ -28,9 +27,9 @@ class WhatsAppWebhookProcessor:
         self.sarvam = sarvam
         self.orchestrator = orchestrator
 
-    def process(self, session: Session, payload: dict[str, Any]) -> int:
+    def process(self, session: Session, messages: list[InboundWhatsAppMessage]) -> int:
         processed = 0
-        for incoming in extract_inbound_messages(payload):
+        for incoming in messages:
             duplicate = session.scalars(
                 select(InboundMessage).where(
                     InboundMessage.wa_message_id == incoming.message_id

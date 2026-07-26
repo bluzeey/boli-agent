@@ -35,7 +35,10 @@ The production vision extends the same case into vendor outreach, bid completion
 - Buyer shortlist selection (`1, 3, 4`) over WhatsApp.
 - Shortlist confirmation and clearing.
 - Canonical, versioned RFQ generation from the case.
-- Outreach-approval gate (`outreach_approved`) — no vendor is contacted.
+- Controlled vendor outreach: durable vendor records with consent, suppression,
+  and rate limiting; RFQ sent to consented vendors on approval.
+- Vendor-facing RFQ message (distinct from the buyer-facing preview).
+- Outreach-approval gate and per-vendor send/delivery status.
 - Celery/Redis worker path so the webhook can acknowledge quickly.
 - Read-only procurement-case API plus shortlist/RFQ endpoints.
 - Docker Compose for API, worker, PostgreSQL, and Redis.
@@ -45,13 +48,12 @@ The production vision extends the same case into vendor outreach, bid completion
 
 ## Current scope boundary
 
-The current product stops at the outreach-approval gate. After the buyer
-approves outreach (`outreach_approved`), Boli does **not** yet:
+The current product sends the RFQ to consented vendors after buyer approval and
+then stops at `collecting_responses`. It does **not** yet:
 
-- Send any message to a vendor (no vendor is ever contacted in this milestone).
+- Ingest or parse vendor quotations (text, voice, PDF, image).
 - Claim that a search result is qualified.
-- Collect quotations.
-- Recommend a final vendor.
+- Compare bids, detect exclusions, or recommend a final vendor.
 - Negotiate prices or terms.
 - Sign or create a legally binding agreement.
 - Persist Google Places content as a permanent vendor database.
@@ -67,11 +69,12 @@ cp .env.example .env
 For a local dry run, keep:
 
 ```env
+WHATSAPP_PROVIDER=twilio
 PROCESS_INLINE=true
 SEARCH_PROVIDER=mock
 ```
 
-This requires no Meta, Sarvam, Google, Redis, or PostgreSQL credentials. Outbound WhatsApp messages are logged as dry-run messages.
+This requires no Twilio, Sarvam, Google, Redis, or PostgreSQL credentials. Outbound WhatsApp messages are logged as dry-run messages.
 
 ### 2. Install and run
 
@@ -88,13 +91,16 @@ curl http://localhost:8000/health
 
 ### 3. Simulate a WhatsApp webhook
 
+The default provider is Twilio, which posts form-encoded data:
+
 ```bash
-curl -X POST http://localhost:8000/webhooks/whatsapp \
-  -H 'Content-Type: application/json' \
-  --data @scripts/sample_webhook.json
+curl -X POST http://localhost:8000/webhooks/twilio/whatsapp \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data 'MessageSid=demo-001&From=whatsapp%3A%2B919999999999&Body=Find+pest+control+vendors+in+Jaipur&NumMedia=0'
 ```
 
-The terminal will show the WhatsApp reply in dry-run mode.
+The terminal will show the WhatsApp reply in dry-run mode. (The Meta Cloud API
+route at `/webhooks/whatsapp` is also available when `WHATSAPP_PROVIDER=meta`.)
 
 ### 4. Run tests
 
@@ -111,7 +117,35 @@ make up
 
 For Docker, use the PostgreSQL and Redis URLs already present in `.env.example`, and set `PROCESS_INLINE=false`.
 
-## Meta WhatsApp Cloud API setup
+## Twilio WhatsApp Sandbox setup (default, prototype)
+
+The default `WHATSAPP_PROVIDER=twilio` path uses the Twilio Sandbox so you can
+test the full WhatsApp flow without the Meta onboarding. See `USER_GUIDE.md`
+Section 5.1 for the complete walkthrough. In short:
+
+1. Activate the WhatsApp Sandbox in your Twilio console and join it from your
+   personal WhatsApp number.
+2. Configure in `.env`:
+
+   ```env
+   WHATSAPP_PROVIDER=twilio
+   TWILIO_ACCOUNT_SID=
+   TWILIO_AUTH_TOKEN=
+   TWILIO_WHATSAPP_FROM=+14155238886
+   APP_BASE_URL=https://YOUR_NGROK_URL.ngrok-free.app
+   ```
+
+3. Expose the local server (`ngrok http 8000`) and point the Twilio Sandbox
+   webhook to `https://YOUR_HOST/webhooks/twilio/whatsapp` (HTTP POST).
+4. Send a requirement from your joined WhatsApp number.
+
+`TWILIO_AUTH_TOKEN` validates the `X-Twilio-Signature` header (skipped when
+empty, for dev). Empty Twilio credentials → dry-run mode (messages logged).
+
+## Meta WhatsApp Cloud API setup (production alternate)
+
+The direct Meta integration is preserved for production. Set
+`WHATSAPP_PROVIDER=meta` and configure:
 
 1. Create a Meta app with a WhatsApp Business Account and phone number.
 2. Set the webhook callback to:
@@ -125,13 +159,16 @@ For Docker, use the PostgreSQL and Redis URLs already present in `.env.example`,
 5. Configure:
 
    ```env
+   WHATSAPP_PROVIDER=meta
    WHATSAPP_ACCESS_TOKEN=
    WHATSAPP_APP_SECRET=
    WHATSAPP_PHONE_NUMBER_ID=
    WHATSAPP_GRAPH_VERSION=
    ```
 
-Use a publicly reachable HTTPS endpoint. During development, a secure tunnel can expose the local server.
+These Meta env vars are intentionally omitted from `.env.example`; add them
+only when switching to the Meta provider. Use a publicly reachable HTTPS
+endpoint. During development, a secure tunnel can expose the local server.
 
 ## Sarvam setup
 
@@ -169,7 +206,11 @@ The adapter uses Google Places Text Search (New) with a field mask. Google Place
 | POST | `/api/cases/{case_id}/shortlist` | Record a buyer selection (`{"selection":[1,3]}`) |
 | POST | `/api/cases/{case_id}/rfq` | Generate (or regenerate) the RFQ |
 | GET | `/api/cases/{case_id}/rfq` | Read the latest RFQ |
-| POST | `/api/cases/{case_id}/rfq/approve` | Approve the outreach gate |
+| POST | `/api/cases/{case_id}/rfq/approve` | Approve the RFQ and prepare outreach |
+| POST | `/api/cases/{case_id}/outreach` | Send the RFQ to consented vendors |
+| GET | `/api/cases/{case_id}/vendors` | List vendors with outreach status |
+| POST | `/api/cases/{case_id}/vendors/{vendor_id}/consent` | Grant/revoke vendor consent |
+| GET | `/api/cases/{case_id}/responses` | List per-vendor outreach status |
 
 See `USER_GUIDE.md` for the full setup, credentials checklist, and end-to-end
 examples.
@@ -195,14 +236,13 @@ IDEA_SCOPE.md            Product and demo scope lock
 
 ## Next milestone
 
-Controlled vendor outreach. The current milestone ends at `outreach_approved` —
-no vendor is contacted. The next milestone picks up there:
+Quotation ingestion. The current milestone ends at `collecting_responses` — the
+RFQ has been sent to consented vendors. The next milestone:
 
-1. Add a vendor-contact queue with consent, template, and rate controls.
-2. Send the approved RFQ to the selected vendors through WhatsApp and email.
-3. Track delivery and response status per vendor.
-4. Do not enable autonomous cold outreach until messaging consent, template,
-   rate, and anti-spam controls are reviewed.
+1. Receive vendor responses in text, voice, PDF, and image.
+2. Link each response to the correct case and vendor.
+3. Extract generic commercial fields with evidence references.
+4. Mark fields sourced, inferred, missing, or contradicted.
 
-See `USER_GUIDE.md` for the credentials and setup needed before that, and
-`IMPLEMENTATION_PLAN.md` Milestone 4 for the full build tasks.
+See `USER_GUIDE.md` for the credentials and setup, and `IMPLEMENTATION_PLAN.md`
+Milestone 5 for the full build tasks.

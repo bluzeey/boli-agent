@@ -5,9 +5,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import CaseStatus, ProcurementCase, RfqStatus, VendorCandidate, ensure_aware
+from app.models import (
+    CaseStatus,
+    ProcurementCase,
+    RfqStatus,
+    Vendor,
+    VendorCandidate,
+    VendorResponse,
+    VendorResponseStatus,
+    ensure_aware,
+)
 from app.schemas import (
     CaseRead,
+    ConsentRequest,
+    ConsentResponse,
+    OutreachSummaryRead,
     RfqApproveResponse,
     RfqGenerateResponse,
     RfqRead,
@@ -15,7 +27,10 @@ from app.schemas import (
     ShortlistRequest,
     ShortlistResponse,
     VendorCandidateRead,
+    VendorResponseRead,
+    VendorWithStatusRead,
 )
+from app.services.outreach import prepare_outreach, send_outreach
 from app.services.rfq import generate_rfq, latest_rfq
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -209,6 +224,9 @@ def approve_case_rfq(
     session.add(procurement_case)
     session.commit()
 
+    # Prepare vendor leads and queued outreach (no message is sent here).
+    prepare_outreach(session, procurement_case, rfq)
+
     return RfqApproveResponse(
         case_id=case_id,
         status=procurement_case.status,
@@ -216,3 +234,127 @@ def approve_case_rfq(
         rfq_status=rfq.status,
         outreach_authorized=True,
     )
+
+
+@router.post("/{case_id}/outreach", response_model=OutreachSummaryRead)
+def trigger_outreach(
+    case_id: str, session: Session = Depends(get_session)
+) -> OutreachSummaryRead:
+    procurement_case = _get_case_or_404(session, case_id)
+    if procurement_case.status not in {
+        CaseStatus.OUTREACH_APPROVED.value,
+        CaseStatus.COLLECTING_RESPONSES.value,
+        CaseStatus.OUTREACH_IN_PROGRESS.value,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Approve the RFQ before triggering outreach.",
+        )
+    from app.config import get_settings
+    from app.container import build_whatsapp_client
+
+    settings = get_settings()
+    whatsapp = build_whatsapp_client(settings)
+    summary = send_outreach(session, case_id, whatsapp, settings)
+    return OutreachSummaryRead(
+        case_id=summary.case_id,
+        status=summary.status,
+        total=summary.total,
+        sent=summary.sent,
+        failed=summary.failed,
+        skipped_cold=summary.skipped_cold,
+    )
+
+
+@router.get("/{case_id}/vendors", response_model=list[VendorWithStatusRead])
+def list_case_vendors(
+    case_id: str, session: Session = Depends(get_session)
+) -> list[VendorWithStatusRead]:
+    _get_case_or_404(session, case_id)
+    responses = session.scalars(
+        select(VendorResponse)
+        .where(VendorResponse.case_id == case_id)
+        .order_by(VendorResponse.created_at.asc())
+    ).all()
+    out: list[VendorWithStatusRead] = []
+    for response in responses:
+        vendor = session.scalars(
+            select(Vendor).where(Vendor.id == response.vendor_id)
+        ).first()
+        if not vendor:
+            continue
+        out.append(
+            VendorWithStatusRead(
+                id=vendor.id,
+                external_id=vendor.external_id,
+                name=vendor.name,
+                phone=vendor.phone,
+                email=vendor.email,
+                provider=vendor.provider,
+                contact_consent=vendor.contact_consent,
+                consent_source=vendor.consent_source,
+                opted_out=vendor.opted_out,
+                outreach_status=response.status,
+            )
+        )
+    return out
+
+
+@router.post(
+    "/{case_id}/vendors/{vendor_id}/consent", response_model=ConsentResponse
+)
+def set_vendor_consent(
+    case_id: str,
+    vendor_id: str,
+    payload: ConsentRequest,
+    session: Session = Depends(get_session),
+) -> ConsentResponse:
+    _get_case_or_404(session, case_id)
+    vendor = session.scalars(
+        select(Vendor).where(Vendor.id == vendor_id)
+    ).first()
+    if not vendor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
+
+    now = datetime.now(UTC)
+    vendor.contact_consent = payload.consent
+    vendor.consent_source = payload.source if payload.consent else None
+    vendor.consented_at = now if payload.consent else None
+    vendor.updated_at = now
+
+    if payload.consent:
+        # Re-queue any skipped response for this vendor on this case.
+        response = session.scalars(
+            select(VendorResponse)
+            .where(
+                VendorResponse.case_id == case_id,
+                VendorResponse.vendor_id == vendor.id,
+            )
+            .order_by(VendorResponse.created_at.desc())
+        ).first()
+        if response:
+            response.status = VendorResponseStatus.QUEUED.value
+            response.last_error = None
+            response.updated_at = now
+            session.add(response)
+
+    session.add(vendor)
+    session.commit()
+    return ConsentResponse(
+        vendor_id=vendor.id,
+        contact_consent=vendor.contact_consent,
+        consent_source=vendor.consent_source,
+    )
+
+
+@router.get("/{case_id}/responses", response_model=list[VendorResponseRead])
+def list_case_responses(
+    case_id: str, session: Session = Depends(get_session)
+) -> list[VendorResponseRead]:
+    _get_case_or_404(session, case_id)
+    responses = session.scalars(
+        select(VendorResponse)
+        .where(VendorResponse.case_id == case_id)
+        .order_by(VendorResponse.created_at.asc())
+    ).all()
+    return [VendorResponseRead.model_validate(r) for r in responses]
