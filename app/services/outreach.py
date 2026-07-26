@@ -232,7 +232,13 @@ def send_outreach(
         session.add(response)
         session.commit()
 
-    procurement_case.status = CaseStatus.COLLECTING_RESPONSES.value
+    # If nothing was sent (e.g. all cold), stay back at the authorization
+    # checkpoint so the buyer can grant consent and resend, rather than
+    # dead-ending at collecting_responses with no outbound messages.
+    if sent > 0:
+        procurement_case.status = CaseStatus.COLLECTING_RESPONSES.value
+    else:
+        procurement_case.status = CaseStatus.OUTREACH_APPROVED.value
     procurement_case.updated_at = utcnow()
     session.add(procurement_case)
     session.commit()

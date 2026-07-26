@@ -21,6 +21,18 @@ class InboundWhatsAppMessage:
     mime_type: str | None = None
 
 
+def normalize_phone(value: str | None) -> str:
+    """Return digits-only phone for matching across providers.
+
+    e.g. ``whatsapp:+91 90000 00000`` and ``9190000000000`` both normalize to
+    ``9190000000000`` so an inbound sender can be matched to a stored Vendor.phone
+    regardless of formatting.
+    """
+    if not value:
+        return ""
+    return "".join(ch for ch in str(value) if ch.isdigit())
+
+
 def verify_whatsapp_signature(body: bytes, signature_header: str | None, app_secret: str) -> bool:
     if not app_secret:
         return True

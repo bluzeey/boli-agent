@@ -900,17 +900,22 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 - Outreach-approval gate and controlled vendor outreach: durable `Vendor`
   records with consent/suppression, rate-limited WhatsApp sends to consented
   vendors, vendor-facing RFQ message, and per-vendor send/delivery status.
+- Inbound vendor-reply detection: replies are linked to the correct case and
+  vendor (status `responded`, `raw_reply`, `responded_at`), the vendor is
+  acknowledged, and the buyer is notified.
+- Buyer `status` command and a `collecting_responses` guard (unrecognized text
+  no longer silently closes the case).
 - Category-pack contract, registry, and generic pack stub.
 - REST endpoints for cases, candidates, shortlist, RFQ, vendors, consent,
   outreach, and responses.
 - Celery worker (message processing + a dedicated `send_outreach` task).
 - Docker Compose.
 - Alembic migrations.
-- Unit tests.
+- Unit + route-level tests.
 
 ### Requires credentials and live verification
 
-- Meta webhook registration.
+- Twilio Sandbox (default provider) or Meta webhook registration.
 - WhatsApp message send and receive.
 - Voice media download.
 - Sarvam transcription and structured output.
@@ -918,9 +923,10 @@ Mitigation: Use pre-consented test vendors and prepared heterogeneous responses.
 
 ### Next implementation unit
 
-Quotation ingestion (Milestone 5). Receive vendor responses in text, voice,
-PDF, and image; link each to the correct case and vendor; extract generic
-commercial fields with evidence references; mark fields
+Quotation ingestion (Milestone 5, structured extraction). Vendor replies are
+already captured (raw text / transcript, response status). The next step is to
+extract structured commercial fields (price, tax, lead time, payment terms)
+from those replies with evidence references, and mark fields
 sourced/inferred/missing/contradicted.
 
 ## 20. Next actions in order

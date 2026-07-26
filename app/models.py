@@ -229,9 +229,10 @@ class Vendor(Base):
 class VendorResponse(Base):
     """The outreach + response lifecycle for one vendor on one case/RFQ.
 
-    Outreach states (queued/sent/delivered/failed/skipped_cold) are populated
-    in the outreach milestone; response states (responded/declined/expired) are
-    filled in by quotation ingestion (Milestone 5).
+    Outreach states (queued/sent/delivered/failed/skipped_cold) are populated by
+    the outreach service. Inbound vendor replies are linked here (status
+    RESPONDED, responded_at, raw_reply). Structured quote-field extraction and
+    response-deadline expiry are deferred to Milestone 5.
     """
 
     __tablename__ = "vendor_responses"
@@ -254,6 +255,8 @@ class VendorResponse(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    raw_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reply_message_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

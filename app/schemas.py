@@ -144,6 +144,8 @@ class VendorResponseRead(BaseModel):
     sent_at: datetime | None = None
     delivered_at: datetime | None = None
     responded_at: datetime | None = None
+    raw_reply: str | None = None
+    reply_message_id: str | None = None
     attempts: int = 0
     last_error: str | None = None
 

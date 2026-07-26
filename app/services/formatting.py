@@ -48,6 +48,19 @@ def render_outreach_approved(rfq) -> str:
 
 def render_outreach_summary(summary) -> str:
     """Report outreach results to the buyer."""
+    if summary.sent == 0:
+        lines = ["*No vendors were contacted yet.*"]
+        if summary.skipped_cold:
+            lines.append(
+                f"{summary.skipped_cold} vendor(s) skipped (cold/not consented)."
+            )
+        if summary.failed:
+            lines.append(f"{summary.failed} failed to send.")
+        lines.append(
+            "Reply *consent <number>* to authorize a vendor, then *resend*."
+        )
+        return "\n".join(lines)
+
     lines = [
         "📨 *Outreach complete* — case now collecting responses.",
         f"Vendors contacted: {summary.sent}",
@@ -73,4 +86,49 @@ def render_stale_shortlist() -> str:
     return (
         "The previous search results have expired. Please send the requirement again "
         "so I can run a fresh vendor search."
+    )
+
+
+def render_vendor_ack() -> str:
+    """Acknowledgement sent to a vendor when their reply is received."""
+    return (
+        "Thank you, your response has been recorded and shared with the buyer. "
+        "They will reach out if they need anything else."
+    )
+
+
+def render_vendor_replied(vendor_name: str, case_id: str) -> str:
+    """Notification sent to the buyer when a vendor replies."""
+    return (
+        f"📋 *{vendor_name}* replied to your RFQ (case #{case_id}). "
+        "Reply *status* to see response progress."
+    )
+
+
+def render_case_status(stats: dict) -> str:
+    """Summarise outreach/response progress for the buyer."""
+    lines = ["*Case status*"]
+    lines.append(f"RFQs sent: {stats.get('sent', 0)}")
+    lines.append(f"Vendors responded: {stats.get('responded', 0)}")
+    skipped = stats.get("skipped", 0)
+    failed = stats.get("failed", 0)
+    if skipped:
+        lines.append(f"Skipped (cold): {skipped}")
+    if failed:
+        lines.append(f"Failed to send: {failed}")
+    pending = stats.get("pending", 0)
+    if pending:
+        lines.append(f"Awaiting response: {pending}")
+    lines.append("")
+    lines.append(
+        "Reply *consent <number>* to authorize a cold vendor, *resend* to reach out "
+        "again, or *new search* to start over."
+    )
+    return "\n".join(lines)
+
+
+def render_collecting_hint() -> str:
+    return (
+        "I didn't recognise that. Reply *status* to see progress, *consent <number>* "
+        "to authorize a vendor, *resend* to re-send, or *new search* to start over."
     )

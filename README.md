@@ -39,19 +39,24 @@ The production vision extends the same case into vendor outreach, bid completion
   and rate limiting; RFQ sent to consented vendors on approval.
 - Vendor-facing RFQ message (distinct from the buyer-facing preview).
 - Outreach-approval gate and per-vendor send/delivery status.
+- Inbound vendor-reply detection: vendor replies are linked to the right case
+  and vendor, marked *responded*, with the buyer notified.
+- Buyer `status` command and a guard so unrecognized text at
+  `collecting_responses` no longer silently closes the case.
 - Celery/Redis worker path so the webhook can acknowledge quickly.
 - Read-only procurement-case API plus shortlist/RFQ endpoints.
 - Docker Compose for API, worker, PostgreSQL, and Redis.
 - Alembic migrations.
-- Unit tests for signatures, payload parsing, requirement intake, formatting,
-  selection, RFQ generation, and the shortlist flow.
+- Unit + route-level tests for signatures, payload parsing, requirement intake,
+  formatting, selection, RFQ generation, the shortlist flow, outreach, vendor
+  replies, and both webhook routes.
 
 ## Current scope boundary
 
-The current product sends the RFQ to consented vendors after buyer approval and
-then stops at `collecting_responses`. It does **not** yet:
+The current product sends the RFQ to consented vendors and captures vendor
+replies (raw text / transcript, response status). It does **not** yet:
 
-- Ingest or parse vendor quotations (text, voice, PDF, image).
+- Extract structured quote fields (price, tax, lead time) from vendor replies.
 - Claim that a search result is qualified.
 - Compare bids, detect exclusions, or recommend a final vendor.
 - Negotiate prices or terms.

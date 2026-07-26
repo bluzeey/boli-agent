@@ -28,12 +28,17 @@ A buyer sends a WhatsApp text or voice note. Boli:
    selected vendor leads that have **contact consent** (mock/test vendors are
    pre-consented; discovered vendors are cold and skipped until consent is
    granted), then moves to `collecting_responses`.
+9. When a vendor replies (text or voice note), Boli links it to the right case
+   and vendor, marks the vendor as *responded*, acknowledges the vendor, and
+   notifies the buyer.
 
 ### Current boundary (important)
 
-After outreach, Boli **stops at `collecting_responses`**. It does **not** yet:
+Boli captures vendor replies (raw text / transcript) and tracks who responded,
+but it does **not** yet:
 
-- Ingest or parse vendor quotations (text, voice, PDF, image).
+- Extract structured quote fields (price, tax, lead time, payment terms) from
+  replies — replies are stored verbatim.
 - Compare bids, detect exclusions, or recommend a winner.
 - Negotiate, sign, or commit spend.
 
@@ -102,13 +107,20 @@ Each step is a separate WhatsApp message from the buyer. With mock search,
 | `yes` | The canonical RFQ + "reply approve to authorize outreach" | `rfq_ready` |
 | `approve` | "Outreach approved" + sends RFQ to consented vendors + summary | `collecting_responses` |
 
-After outreach, the buyer can manage cold vendors at `collecting_responses`:
+After outreach, the buyer can manage the case at `collecting_responses`:
 
+- `status` → shows how many RFQs were sent, how many vendors responded, and any
+  skipped/failed.
 - `consent 2` → grants buyer-confirmed consent to the vendor at original
   shortlist position 2 and re-queues it.
 - `resend` → re-runs outreach for any queued vendors (e.g. after granting
   consent).
-- `new search` (or any new requirement) → closes the case and starts fresh.
+- `new search` (or any new requirement explicitly) → closes the case and starts
+  fresh. Unrecognized text no longer silently closes the case — it replies with
+  a hint of available commands.
+
+When a vendor replies, the buyer is automatically notified ("Vendor X replied")
+and can reply `status` to see progress.
 
 Other accepted replies:
 

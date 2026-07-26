@@ -24,6 +24,8 @@ from app.models import (
 from app.schemas import SearchResult
 from app.search.base import SearchProvider
 from app.services.formatting import (
+    render_case_status,
+    render_collecting_hint,
     render_outreach_approved,
     render_outreach_summary,
     render_search_results,
@@ -194,9 +196,11 @@ class ProcurementOrchestrator:
             return self._handle_shortlist_confirmation(session, sender, text, active_case)
         if status == CaseStatus.RFQ_READY.value:
             return self._handle_rfq_ready(session, sender, text, active_case)
-        if status == CaseStatus.COLLECTING_RESPONSES.value:
+        if status in {
+            CaseStatus.COLLECTING_RESPONSES.value,
+            CaseStatus.OUTREACH_APPROVED.value,
+        }:
             return self._handle_collecting_responses(session, sender, text, active_case)
-        # OUTREACH_APPROVED is the authorization checkpoint; a new message starts fresh.
         return None
 
     def _handle_shortlist_ready(
@@ -357,6 +361,11 @@ class ProcurementOrchestrator:
     ) -> ProcurementCase | None:
         normalized = text.strip().lower()
 
+        if normalized == "status":
+            stats = self._case_status_stats(session, active_case.id)
+            self.whatsapp.send_text(sender, render_case_status(stats))
+            return active_case
+
         if normalized.startswith("consent "):
             rest = normalized[len("consent ") :]
             positions = parse_selection(rest, 1_000_000)
@@ -385,8 +394,42 @@ class ProcurementOrchestrator:
             )
             return active_case
 
-        # Any other message: start a fresh case.
-        return None
+        # Unrecognized text: keep the case open and hint at available commands
+        # rather than silently closing it and starting a new procurement case.
+        self.whatsapp.send_text(sender, render_collecting_hint())
+        return active_case
+
+    def _case_status_stats(self, session: Session, case_id: str) -> dict:
+        responses = list(
+            session.scalars(
+                select(VendorResponse).where(VendorResponse.case_id == case_id)
+            )
+        )
+        sent = responded = skipped = failed = pending = 0
+        for r in responses:
+            status = r.status
+            if status == VendorResponseStatus.RESPONDED.value:
+                responded += 1
+                sent += 1
+            elif status in {
+                VendorResponseStatus.SENT.value,
+                VendorResponseStatus.DELIVERED.value,
+            }:
+                sent += 1
+                pending += 1
+            elif status == VendorResponseStatus.SKIPPED_COLD.value:
+                skipped += 1
+            elif status == VendorResponseStatus.FAILED.value:
+                failed += 1
+            elif status == VendorResponseStatus.QUEUED.value:
+                pending += 1
+        return {
+            "sent": sent,
+            "responded": responded,
+            "skipped": skipped,
+            "failed": failed,
+            "pending": pending,
+        }
 
     def _grant_consent(
         self, session: Session, case_id: str, positions: list[int]
@@ -414,7 +457,7 @@ class ProcurementOrchestrator:
             vendor.consented_at = now
             vendor.updated_at = now
             session.add(vendor)
-            # Re-queue any skipped response for this vendor on this case.
+            # Re-queue any skipped/failed response for this vendor on this case.
             response = session.scalars(
                 select(VendorResponse)
                 .where(
@@ -423,7 +466,10 @@ class ProcurementOrchestrator:
                 )
                 .order_by(VendorResponse.created_at.desc())
             ).first()
-            if response and response.status == VendorResponseStatus.SKIPPED_COLD.value:
+            if response and response.status in {
+                VendorResponseStatus.SKIPPED_COLD.value,
+                VendorResponseStatus.FAILED.value,
+            }:
                 response.status = VendorResponseStatus.QUEUED.value
                 response.last_error = None
                 response.updated_at = now
