@@ -92,6 +92,27 @@ def test_chat_page_served(client):
     assert "<html" in r.text.lower()
 
 
+def test_processor_errors_are_generic_in_saved_browser_transcripts(client, monkeypatch):
+    import app.api.browser_chat as browser_chat
+
+    api, engine = client
+    processor = _build_test_processor(engine)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("synthetic-private-provider-response")
+
+    monkeypatch.setattr(processor.orchestrator, "handle_text", fail)
+    monkeypatch.setattr(browser_chat, "build_webhook_processor", lambda: processor)
+    response = api.post("/api/browser-chat/messages", json={"text": "synthetic test"})
+    assert response.status_code == 200
+    assert response.json()["messages"][-1]["body"] == (
+        "[ERROR] The request could not be processed. Please try again."
+    )
+    assert "synthetic-private-provider-response" not in api.get(
+        "/api/browser-chat/messages"
+    ).text
+
+
 def test_create_new_session(client):
     api, _ = client
     r = api.post("/api/browser-chat/sessions")

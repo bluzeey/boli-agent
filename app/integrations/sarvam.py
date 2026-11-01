@@ -91,6 +91,32 @@ class SarvamClient:
             stripped = re.sub(r"\s*```$", "", stripped)
         return json.loads(stripped)
 
+    @classmethod
+    def _completion_json(cls, response: httpx.Response) -> dict[str, Any]:
+        """Require an actual structured answer without exposing model output in errors."""
+        try:
+            payload = response.json()
+            choice = payload["choices"][0]
+            content = choice["message"]["content"]
+            finish_reason = choice.get("finish_reason")
+        except (ValueError, TypeError, KeyError, IndexError):
+            raise RuntimeError("Sarvam returned an invalid response envelope") from None
+        if not isinstance(content, str) or not content.strip():
+            reason = (
+                finish_reason
+                if isinstance(finish_reason, str)
+                and finish_reason in {"stop", "length", "tool_calls", "content_filter"}
+                else "unknown"
+            )
+            raise RuntimeError(f"Sarvam returned no structured answer (finish reason: {reason})")
+        try:
+            parsed = cls._parse_json_response(content)
+        except (TypeError, ValueError):
+            raise RuntimeError("Sarvam returned invalid structured JSON") from None
+        if not isinstance(parsed, dict):
+            raise RuntimeError("Sarvam returned a non-object structured answer")
+        return parsed
+
     def transcribe_audio(self, audio: bytes, mime_type: str) -> str:
         if not self.settings.sarvam_api_key:
             raise RuntimeError("SARVAM_API_KEY is required for voice-note transcription")
@@ -152,6 +178,8 @@ Search query must be suitable for vendor discovery and should contain the catego
                     {"role": "user", "content": user_prompt},
                 ],
                 "temperature": 0.1,
+                "reasoning_effort": None,
+                "max_tokens": 2048,
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": {
@@ -163,15 +191,11 @@ Search query must be suitable for vendor discovery and should contain the catego
             },
         )
         response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        parsed = self._completion_json(response)
         try:
-            parsed = self._parse_json_response(content)
             return RequirementExtraction.model_validate(parsed)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Sarvam extract_requirement parse failed: {exc}. "
-                f"Raw content (first 500 chars): {content[:500]}"
-            ) from exc
+        except ValueError:
+            raise RuntimeError("Sarvam returned invalid requirement fields") from None
 
     def extract_quote(self, reply_text: str, required_fields: list[str]) -> QuoteExtraction:
         if not self.settings.sarvam_api_key:
@@ -204,6 +228,8 @@ Search query must be suitable for vendor discovery and should contain the catego
                     {"role": "user", "content": user_prompt},
                 ],
                 "temperature": 0.1,
+                "reasoning_effort": None,
+                "max_tokens": 2048,
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": {
@@ -215,15 +241,11 @@ Search query must be suitable for vendor discovery and should contain the catego
             },
         )
         response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        parsed = self._completion_json(response)
         try:
-            parsed = self._parse_json_response(content)
             return QuoteExtraction.model_validate(parsed)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Sarvam extract_quote parse failed: {exc}. "
-                f"Raw content (first 500 chars): {content[:500]}"
-            ) from exc
+        except ValueError:
+            raise RuntimeError("Sarvam returned invalid quote fields") from None
 
 
 def heuristic_extract_requirement(

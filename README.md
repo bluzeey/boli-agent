@@ -204,6 +204,12 @@ SARVAM_STT_MODEL=saaras:v3
 SARVAM_STT_MODE=codemix
 ```
 
+Structured requirement and quote extraction explicitly disable reasoning and cap
+the answer at 2048 tokens. Sarvam documents that default reasoning can consume
+the completion budget and leave visible content empty. Missing or malformed
+answers now produce a controlled error without including raw model output.
+See [Sarvam's Chat Completion guide](https://docs.sarvam.ai/api/token-factory/chat-completions).
+
 The current REST speech-to-text path is intended for short WhatsApp voice notes. Longer recordings should move to Sarvam's batch API.
 
 ## Search setup

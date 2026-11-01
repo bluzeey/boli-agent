@@ -126,7 +126,7 @@ def send_browser_chat_message(
             logger.exception(
                 "browser chat processing failed for sender=%s: %s", sender, exc
             )
-            error_body = f"[ERROR] {exc}"
+            error_body = "[ERROR] The request could not be processed. Please try again."
             with Session(db_module.engine, expire_on_commit=False) as session:
                 conv = session.scalars(
                     select(Conversation).where(
