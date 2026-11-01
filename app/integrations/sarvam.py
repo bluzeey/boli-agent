@@ -17,19 +17,64 @@ REQUIREMENT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "enum": ["product", "recurring_service", "project", "unknown"],
         },
-        "normalized_need": {"type": "string"},
-        "location": {"type": ["string", "null"]},
-        "quantity": {"type": ["string", "null"]},
-        "budget": {"type": ["string", "null"]},
-        "deadline": {"type": ["string", "null"]},
-        "company_context": {"type": ["string", "null"]},
-        "must_haves": {"type": "array", "items": {"type": "string"}},
-        "missing_fields": {"type": "array", "items": {"type": "string"}},
+        "normalized_need": {
+            "type": "string",
+            "description": "Concrete product or service needed, from the message or existing case; "
+            "use an empty string if unknown. Do not invent specifications.",
+        },
+        "location": {
+            "type": ["string", "null"],
+            "description": "Known city, service area, country, or explicitly remote scope; "
+            "null if unknown. Never assume India or remote from the language alone.",
+        },
+        "quantity": {
+            "type": ["string", "null"],
+            "description": "Quantity and units only if stated or already known; otherwise null. "
+            "Optional for vendor search.",
+        },
+        "budget": {
+            "type": ["string", "null"],
+            "description": "Budget only if stated or already known; otherwise null. "
+            "Optional for vendor search.",
+        },
+        "deadline": {
+            "type": ["string", "null"],
+            "description": "Deadline only if stated or already known; otherwise null. "
+            "Optional for vendor search.",
+        },
+        "company_context": {
+            "type": ["string", "null"],
+            "description": "Company context only if stated or already known; otherwise null. "
+            "Optional for vendor search.",
+        },
+        "must_haves": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Only stated or already known constraints; empty array if none.",
+        },
+        "missing_fields": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["normalized_need", "location"]},
+            "description": "Only missing vendor-search prerequisites: normalized_need and/or "
+            "location. Empty when both are known; never include optional commercial fields.",
+        },
         "preferred_language": {"type": "string"},
-        "search_ready": {"type": "boolean"},
-        "search_query": {"type": ["string", "null"]},
+        "search_ready": {
+            "type": "boolean",
+            "description": "True if and only if a concrete need and geography are known. "
+            "Missing quantity, budget, deadline, or company context must not make this false.",
+        },
+        "search_query": {
+            "type": ["string", "null"],
+            "description": "Vendor-discovery query containing the known need and geography; "
+            "null until both are known. Do not add unstated facts.",
+        },
         "acknowledgement": {"type": "string"},
-        "clarifying_question": {"type": ["string", "null"]},
+        "clarifying_question": {
+            "type": ["string", "null"],
+            "description": "At most one question about a missing need or geography; "
+            "null when search_ready is true. Do not demand optional commercial details.",
+        },
     },
     "required": [
         "request_type",
@@ -84,11 +129,13 @@ class SarvamClient:
 
     @staticmethod
     def _parse_json_response(content: str) -> dict[str, Any]:
-        """Parse Sarvam's JSON response, stripping markdown code blocks if present."""
+        """Accept JSON or one fully enclosed JSON markdown block, without repairing it."""
         stripped = content.strip()
         if stripped.startswith("```"):
-            stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
-            stripped = re.sub(r"\s*```$", "", stripped)
+            fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", stripped, re.S | re.I)
+            if not fenced:
+                raise ValueError("Invalid JSON markdown block")
+            stripped = fenced.group(1)
         return json.loads(stripped)
 
     @classmethod
@@ -109,6 +156,8 @@ class SarvamClient:
                 else "unknown"
             )
             raise RuntimeError(f"Sarvam returned no structured answer (finish reason: {reason})")
+        if finish_reason is not None and finish_reason != "stop":
+            raise RuntimeError("Sarvam returned an incomplete structured answer")
         try:
             parsed = cls._parse_json_response(content)
         except (TypeError, ValueError):
@@ -156,9 +205,17 @@ class SarvamClient:
 You are the intake engine for Boli, a WhatsApp-first procurement agent for SMBs.
 Convert the user's multilingual or code-mixed message into a procurement requirement.
 Do not invent commercial facts. Preserve names, numbers, locations, units, budgets and deadlines.
-A request is search-ready only when the thing needed and the relevant geography are known.
-For a national or remote requirement, the geography may be 'India' or 'remote'.
-Ask at most one concise, high-information clarification question.
+Merge the existing case with the latest message; preserve known facts unless the user changes them.
+A request is search-ready if and only if a concrete thing needed and relevant geography are known.
+Quantity, budget, deadline, company context and must-haves are optional, never search prerequisites.
+For example, 'Find packaging boxes in Jaipur' is search-ready even without quantity or budget.
+Use null for unknown optional values, [] for unstated must-haves, and never guess commercial facts.
+Use an empty normalized_need and null location when unknown, never placeholder text like 'unknown'.
+For an explicitly national or remote requirement, geography may be 'India' or 'remote'.
+Never infer geography from language, currency, or an unstated default.
+missing_fields must contain only missing normalized_need and/or location, or [] when search-ready.
+Ask at most one concise clarification about the missing need or geography.
+When search-ready, set clarifying_question to null; do not ask for optional commercial details.
 The acknowledgement and clarification should follow the user's language and script where practical.
 Search query must be suitable for vendor discovery and should contain the category plus location.
 """.strip()
@@ -193,9 +250,27 @@ Search query must be suitable for vendor discovery and should contain the catego
         response.raise_for_status()
         parsed = self._completion_json(response)
         try:
-            return RequirementExtraction.model_validate(parsed)
+            extraction = RequirementExtraction.model_validate(parsed, strict=True)
         except ValueError:
             raise RuntimeError("Sarvam returned invalid requirement fields") from None
+        extraction.normalized_need = extraction.normalized_need.strip()
+        for field in ("location", "quantity", "budget", "deadline", "company_context"):
+            value = getattr(extraction, field)
+            if value is not None and not value.strip():
+                setattr(extraction, field, None)
+        # Search metadata follows validated extracted facts, not the model's optional-field policy.
+        extraction.missing_fields = [
+            field for field in ("normalized_need", "location") if not getattr(extraction, field)
+        ]
+        extraction.search_ready = not extraction.missing_fields
+        extraction.search_query = (
+            f"{extraction.normalized_need} in {extraction.location}"
+            if extraction.search_ready
+            else None
+        )
+        if extraction.search_ready:
+            extraction.clarifying_question = None
+        return extraction
 
     def extract_quote(self, reply_text: str, required_fields: list[str]) -> QuoteExtraction:
         if not self.settings.sarvam_api_key:
@@ -206,7 +281,8 @@ Search query must be suitable for vendor discovery and should contain the catego
             "Extract commercial fields from a vendor's reply to an RFQ. "
             "Do not invent values. Preserve numbers, units, currencies, and durations "
             "exactly as stated. "
-            "If a field is not present in the reply, leave it null (or list it under 'missing'). "
+            "If a field is not present in the reply, leave its value null and list it under "
+            "'missing' only if it is required. Use [] for unstated exclusions. "
             "Capture any exclusions, conditions, or caveats in 'exclusions'. "
             "Capture delivery/lead time as a short string e.g. '3 days', '2 weeks'. "
             "Capture price as the total quoted amount with currency; "
@@ -243,7 +319,7 @@ Search query must be suitable for vendor discovery and should contain the catego
         response.raise_for_status()
         parsed = self._completion_json(response)
         try:
-            return QuoteExtraction.model_validate(parsed)
+            return QuoteExtraction.model_validate(parsed, strict=True)
         except ValueError:
             raise RuntimeError("Sarvam returned invalid quote fields") from None
 

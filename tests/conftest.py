@@ -53,6 +53,18 @@ from app.services.orchestrator import ProcurementOrchestrator  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def browser_rate_store(monkeypatch):
+    import fakeredis
+
+    import app.browser_access as browser_access
+
+    store = fakeredis.FakeRedis()
+    monkeypatch.setattr(browser_access, "get_rate_store", lambda: store)
+    yield store
+    store.close()
+
+
+@pytest.fixture(autouse=True)
 def block_external_network(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("External network is forbidden in offline tests")

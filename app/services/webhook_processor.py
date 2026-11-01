@@ -22,6 +22,7 @@ from app.services.formatting import (
 )
 from app.services.orchestrator import ProcurementOrchestrator
 from app.services.quote import extract_response_quote
+from app.services.vendor_scope import VendorScopeError, vendor_scope_for_case
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,10 @@ _ACTIVE_VENDOR_CASE_STATES = {
     CaseStatus.OUTREACH_IN_PROGRESS.value,
     CaseStatus.COLLECTING_RESPONSES.value,
 }
+
+
+class AmbiguousVendorReply(ValueError):
+    """A phone number alone cannot identify one active vendor response."""
 
 
 class WhatsAppWebhookProcessor:
@@ -156,6 +161,15 @@ class WhatsAppWebhookProcessor:
                     procurement_case.id,
                     procurement_case.status,
                 )
+            except (AmbiguousVendorReply, VendorScopeError) as exc:
+                # Hold unassignable replies without notifying a buyer or creating
+                # a new buyer conversation from the vendor's phone number.
+                logger.warning("processor: vendor reply held: %s", exc)
+                record.status = MessageStatus.FAILED.value
+                record.error = str(exc)
+                record.processed_at = utcnow()
+                session.add(record)
+                session.commit()
             except Exception as exc:
                 logger.exception(
                     "processor: FAILED to process message_id=%s: %s",
@@ -181,7 +195,7 @@ class WhatsAppWebhookProcessor:
     def _find_vendor_response(
         self, session: Session, sender: str
     ) -> tuple[VendorResponse, Vendor, ProcurementCase] | None:
-        """Match an inbound sender to a vendor on an active outreach case."""
+        """Match exactly one phone and verify the vendor belongs to its case owner."""
         sender_digits = normalize_phone(sender)
         if not sender_digits:
             return None
@@ -191,10 +205,19 @@ class WhatsAppWebhookProcessor:
             .join(ProcurementCase, ProcurementCase.id == VendorResponse.case_id)
             .where(ProcurementCase.status.in_(_ACTIVE_VENDOR_CASE_STATES))
         ).all()
-        for response, vendor, case in rows:
-            if normalize_phone(vendor.phone) == sender_digits:
-                return response, vendor, case
-        return None
+        matches = [
+            (response, vendor, case)
+            for response, vendor, case in rows
+            if normalize_phone(vendor.phone) == sender_digits
+        ]
+        if len(matches) > 1:
+            raise AmbiguousVendorReply("Vendor reply matches multiple active responses")
+        if not matches:
+            return None
+        response, vendor, case = matches[0]
+        if vendor.owner_scope != vendor_scope_for_case(session, case):
+            raise VendorScopeError("Vendor reply does not match the case owner scope")
+        return response, vendor, case
 
     def _handle_vendor_reply(
         self,
@@ -207,6 +230,12 @@ class WhatsAppWebhookProcessor:
         case: ProcurementCase,
     ) -> None:
         """Link a vendor reply to its VendorResponse and notify both parties."""
+        if (
+            response.case_id != case.id
+            or response.vendor_id != vendor.id
+            or vendor.owner_scope != vendor_scope_for_case(session, case)
+        ):
+            raise VendorScopeError("Vendor reply does not match the case owner scope")
         now = utcnow()
         response.status = VendorResponseStatus.RESPONDED.value
         response.responded_at = now

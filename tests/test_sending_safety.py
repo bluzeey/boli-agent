@@ -1,15 +1,19 @@
+import secrets
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from uuid import uuid4
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.browser_access import OWNER_COOKIE, owner_digest
 from app.config import Settings
 from app.integrations.hybrid_whatsapp import HybridWhatsAppClient
 from app.integrations.twilio import TwilioWhatsAppClient
 from app.integrations.whatsapp import InboundWhatsAppMessage, WhatsAppClient, normalize_phone
-from app.models import ChatMessage, Vendor, VendorResponse
+from app.models import BrowserOwner, BrowserSession, ChatMessage, Vendor, VendorResponse
 from app.services.webhook_processor import WhatsAppWebhookProcessor
 from tests.conftest import FakeSarvam, FakeWhatsApp
 from tests.test_outreach_api import BUYER, _prepared_case
@@ -43,14 +47,19 @@ def test_provider_send_gate_precedes_http_even_with_credentials(client_class, en
 @pytest.mark.parametrize("enabled", [False, True])
 def test_meta_read_receipts_respect_gate(enabled):
     requests = []
-    with httpx.Client(transport=httpx.MockTransport(
-        lambda request: requests.append(request) or httpx.Response(200, json={})
-    )) as http:
-        client = WhatsAppClient(Settings(
-            allow_outreach=enabled,
-            whatsapp_access_token="synthetic-key",
-            whatsapp_phone_number_id="synthetic-phone",
-        ), http)
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: requests.append(request) or httpx.Response(200, json={})
+        )
+    ) as http:
+        client = WhatsAppClient(
+            Settings(
+                allow_outreach=enabled,
+                whatsapp_access_token="synthetic-key",
+                whatsapp_phone_number_id="synthetic-phone",
+            ),
+            http,
+        )
         client.mark_read("synthetic-message")
     assert len(requests) == int(enabled)
 
@@ -94,7 +103,19 @@ def test_direct_outreach_route_respects_switch(
     import app.config as config
     import app.container as container
     import app.main
+    import tests.test_outreach_api as outreach_tests
     from app.db import get_session
+
+    token = secrets.token_urlsafe(32)
+    owner_hash = owner_digest(token)
+    chat_id = uuid4().hex
+    session.add(
+        BrowserOwner(token_hash=owner_hash, expires_at=datetime.now(UTC) + timedelta(days=1))
+    )
+    session.flush()
+    session.add(BrowserSession(id=chat_id, owner_hash=owner_hash))
+    session.commit()
+    monkeypatch.setattr(outreach_tests, "BUYER", "browser:" + chat_id)
 
     case = _prepared_case(session, orchestrator)
     case.status = "outreach_approved"
@@ -109,10 +130,14 @@ def test_direct_outreach_route_respects_switch(
 
     app.main.app.dependency_overrides[get_session] = disposable_session
     try:
-        with TestClient(app.main.app) as api:
+        with TestClient(
+            app.main.app, base_url="https://boli.test", headers={"Origin": "https://boli.test"}
+        ) as api:
+            api.cookies.set(OWNER_COOKIE, token)
             result = api.post(f"/api/cases/{case.id}/outreach")
-        assert result.status_code == 200
-        assert result.json()["sent"] == (2 if enabled else 0)
+        assert result.status_code == (200 if enabled else 409)
+        if enabled:
+            assert result.json()["sent"] == 2
         assert len(whatsapp.messages) == (2 if enabled else 0)
     finally:
         app.main.app.dependency_overrides.pop(get_session)
@@ -144,12 +169,23 @@ def test_disabled_vendor_ack_and_receipt_preserve_browser_notification(
     engine, session, orchestrator, settings, monkeypatch
 ):
     import app.db as db
+    import tests.test_outreach_api as outreach_tests
     from app.models import Conversation
+
+    owner_hash = owner_digest(secrets.token_urlsafe(32))
+    chat_id = uuid4().hex
+    session.add(
+        BrowserOwner(token_hash=owner_hash, expires_at=datetime.now(UTC) + timedelta(days=1))
+    )
+    session.flush()
+    session.add(BrowserSession(id=chat_id, owner_hash=owner_hash))
+    session.commit()
+    monkeypatch.setattr(outreach_tests, "BUYER", "browser:" + chat_id)
 
     case = _prepared_case(session, orchestrator)
     case.status = "collecting_responses"
     conversation = session.get(Conversation, case.conversation_id)
-    conversation.whatsapp_user_id = "browser:synthetic-buyer"
+    assert conversation.whatsapp_user_id == "browser:" + chat_id
     session.commit()
     vendor = session.scalars(select(Vendor)).first()
     settings.allow_outreach = False
@@ -162,12 +198,17 @@ def test_disabled_vendor_ack_and_receipt_preserve_browser_notification(
     monkeypatch.setattr(db, "engine", engine)
     hybrid = HybridWhatsAppClient(base, settings)
     processor = WhatsAppWebhookProcessor(hybrid, FakeSarvam(), orchestrator)
-    processor.process(session, [InboundWhatsAppMessage(
-        message_id="synthetic-vendor-reply",
-        sender=normalize_phone(vendor.phone),
-        message_type="text",
-        text="Rs 5000, delivery 3 days",
-    )])
+    processor.process(
+        session,
+        [
+            InboundWhatsAppMessage(
+                message_id="synthetic-vendor-reply",
+                sender=normalize_phone(vendor.phone),
+                message_type="text",
+                text="Rs 5000, delivery 3 days",
+            )
+        ],
+    )
     session.expire_all()
     assert session.scalars(select(VendorResponse)).first().status == "responded"
     assert base.messages == []

@@ -19,16 +19,23 @@ def client(monkeypatch, tmp_path):
     )
     Base.metadata.create_all(test_engine)
     monkeypatch.setattr(db_module, "engine", test_engine)
-    monkeypatch.setattr(
-        browser_chat.db_module, "engine", test_engine
-    )
+    monkeypatch.setattr(browser_chat.db_module, "engine", test_engine)
     monkeypatch.setattr(
         browser_chat,
         "build_webhook_processor",
         lambda: _build_test_processor(test_engine),
     )
-    with TestClient(app.main.app) as c:
+
+    def disposable_session():
+        with Session(test_engine) as session:
+            yield session
+
+    app.main.app.dependency_overrides[db_module.get_session] = disposable_session
+    with TestClient(
+        app.main.app, base_url="https://boli.test", headers={"Origin": "https://boli.test"}
+    ) as c:
         yield c, test_engine
+    app.main.app.dependency_overrides.pop(db_module.get_session)
     Base.metadata.drop_all(test_engine)
     test_engine.dispose()
 
@@ -62,10 +69,12 @@ def _build_test_processor(engine):
     class FakeSarvam:
         def extract_requirement(self, text, existing_case=None):
             from app.integrations.sarvam import heuristic_extract_requirement
+
             return heuristic_extract_requirement(text, existing_case)
 
         def extract_quote(self, reply_text, required_fields):
             from app.integrations.sarvam import heuristic_extract_quote
+
             return heuristic_extract_quote(reply_text, required_fields)
 
         def transcribe_audio(self, audio, mime_type):
@@ -75,6 +84,7 @@ def _build_test_processor(engine):
 
     whatsapp = CapturingWhatsApp()
     from app.integrations.hybrid_whatsapp import HybridWhatsAppClient
+
     hybrid = HybridWhatsAppClient(whatsapp, settings)
 
     sarvam = FakeSarvam()
@@ -103,14 +113,13 @@ def test_processor_errors_are_generic_in_saved_browser_transcripts(client, monke
 
     monkeypatch.setattr(processor.orchestrator, "handle_text", fail)
     monkeypatch.setattr(browser_chat, "build_webhook_processor", lambda: processor)
+    assert api.post("/api/browser-chat/sessions").status_code == 200
     response = api.post("/api/browser-chat/messages", json={"text": "synthetic test"})
     assert response.status_code == 200
     assert response.json()["messages"][-1]["body"] == (
         "[ERROR] The request could not be processed. Please try again."
     )
-    assert "synthetic-private-provider-response" not in api.get(
-        "/api/browser-chat/messages"
-    ).text
+    assert "synthetic-private-provider-response" not in api.get("/api/browser-chat/messages").text
 
 
 def test_create_new_session(client):
@@ -203,17 +212,17 @@ def test_delete_session_removes_all_data(client):
     )
 
     with Session(engine) as s:
-        convs = s.scalars(select(Conversation).where(
-            Conversation.whatsapp_user_id == f"browser:{sid}"
-        )).all()
+        convs = s.scalars(
+            select(Conversation).where(Conversation.whatsapp_user_id == f"browser:{sid}")
+        ).all()
         assert len(convs) == 1
-        cases = s.scalars(select(ProcurementCase).where(
-            ProcurementCase.conversation_id == convs[0].id
-        )).all()
+        cases = s.scalars(
+            select(ProcurementCase).where(ProcurementCase.conversation_id == convs[0].id)
+        ).all()
         assert len(cases) >= 1
-        msgs = s.scalars(select(ChatMessage).where(
-            ChatMessage.conversation_id == convs[0].id
-        )).all()
+        msgs = s.scalars(
+            select(ChatMessage).where(ChatMessage.conversation_id == convs[0].id)
+        ).all()
         assert len(msgs) >= 2
 
     r = api.delete(f"/api/browser-chat/sessions/{sid}")
@@ -221,13 +230,11 @@ def test_delete_session_removes_all_data(client):
     assert r.json()["deleted"] is True
 
     with Session(engine) as s:
-        convs = s.scalars(select(Conversation).where(
-            Conversation.whatsapp_user_id == f"browser:{sid}"
-        )).all()
+        convs = s.scalars(
+            select(Conversation).where(Conversation.whatsapp_user_id == f"browser:{sid}")
+        ).all()
         assert len(convs) == 0
-        msgs = s.scalars(select(ChatMessage).where(
-            ChatMessage.sender == f"browser:{sid}"
-        )).all()
+        msgs = s.scalars(select(ChatMessage).where(ChatMessage.sender == f"browser:{sid}")).all()
         assert len(msgs) == 0
 
 
@@ -259,6 +266,7 @@ def test_delete_does_not_affect_other_sessions(client):
 
 def test_delete_nonexistent_session_404(client):
     api, _ = client
+    api.post("/api/browser-chat/sessions")
     r = api.delete("/api/browser-chat/sessions/nonexistent-id")
     assert r.status_code == 404
 

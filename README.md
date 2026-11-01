@@ -191,7 +191,21 @@ token fallback exists. Event POSTs require the configured app secret and a valid
 `X-Hub-Signature-256` over the unchanged raw body. Missing credentials never
 bypass validation. Preserve the signature headers and raw body through the proxy.
 
-Operator access policy remains a separate deployment decision.
+The public browser app uses an opaque, Secure, HttpOnly, host-only cookie and a
+server-side registry of chats. Visitors do not sign up or copy an access key.
+Every transcript, case, RFQ, vendor response and consent action requires that
+browser's ownership. Durable vendor records are scoped to the buyer, so one
+visitor cannot grant consent or change contact data for another visitor.
+Existing unregistered chats and legacy vendors remain held, with no automatic
+adoption by new visitors. Access lasts 30 days; clearing the cookie loses access.
+
+Unsafe browser requests require the exact `APP_BASE_URL` origin. Loopback HTTP
+origins are accepted only when they exactly match the request host and port,
+for private SSH-forward testing. Private API responses are not cached. Browser
+metadata is fetched from the owned server registry; earlier localStorage previews
+are cleared rather than trusted. Redis enforces per-browser and global request
+limits and fails closed if unavailable. `ALLOW_OUTREACH=false` also keeps RFQs at
+the saved draft checkpoint, without approving or queuing external sends.
 
 ## Sarvam setup
 
