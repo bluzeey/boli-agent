@@ -291,6 +291,9 @@ class VendorResponse(Base):
         String(32), default=VendorResponseStatus.QUEUED.value, index=True
     )
     message_text: Mapped[str] = mapped_column(Text, default="")
+    twilio_message_sid: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     response_deadline: Mapped[str | None] = mapped_column(String(256), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -34,13 +34,11 @@ def normalize_phone(value: str | None) -> str:
 
 
 def verify_whatsapp_signature(body: bytes, signature_header: str | None, app_secret: str) -> bool:
-    if not app_secret:
-        return True
-    if not signature_header or not signature_header.startswith("sha256="):
+    if not app_secret.strip() or not signature_header or not signature_header.startswith("sha256="):
         return False
     supplied = signature_header.removeprefix("sha256=")
     expected = hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(supplied, expected)
+    return hmac.compare_digest(supplied.encode(), expected.encode())
 
 
 def extract_inbound_messages(payload: dict[str, Any]) -> list[InboundWhatsAppMessage]:
@@ -97,6 +95,8 @@ class WhatsAppClient:
         )
 
     def send_text(self, to: str, body: str) -> dict[str, Any]:
+        if not self.settings.allow_outreach:
+            return {"blocked": True, "reason": "outreach_disabled"}
         body = body[: self.settings.max_message_chars]
         if not self.settings.whatsapp_access_token or not self.settings.whatsapp_phone_number_id:
             logger.warning("WhatsApp credentials missing; dry-run message to %s: %s", to, body)
@@ -120,6 +120,8 @@ class WhatsAppClient:
         return response.json()
 
     def mark_read(self, message_id: str) -> None:
+        if not self.settings.allow_outreach:
+            return
         if not self.settings.whatsapp_access_token or not self.settings.whatsapp_phone_number_id:
             return
         response = self.http.post(

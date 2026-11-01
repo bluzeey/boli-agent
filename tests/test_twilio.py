@@ -27,9 +27,8 @@ def test_signature_validation_round_trip() -> None:
     assert not verify_twilio_signature(url, params, "bad-signature", token)
 
 
-def test_signature_skipped_when_token_empty() -> None:
-    # Dev escape hatch: no auth token configured -> validation skipped.
-    assert verify_twilio_signature("https://x", {"a": "b"}, "anything", "")
+def test_signature_rejected_when_token_empty() -> None:
+    assert not verify_twilio_signature("https://x", {"a": "b"}, "anything", "")
 
 
 def test_normalize_sender_strips_whatsapp_prefix() -> None:
@@ -78,7 +77,7 @@ def test_extract_voice_note_as_audio() -> None:
 
 
 def test_send_text_dry_run_without_credentials() -> None:
-    client = TwilioWhatsAppClient(Settings())  # no Twilio creds configured
+    client = TwilioWhatsAppClient(Settings(allow_outreach=True))
     result = client.send_text("919999999999", "hello from boli")
     assert result["dry_run"] is True
     assert result["to"] == "919999999999"

@@ -213,8 +213,23 @@ def send_outreach(
             sleep(settings.outbound_rate_delay_seconds)
 
         response.attempts += 1
+        # Retire the previous attempt's correlation before making another send.
+        response.twilio_message_sid = None
+        response.sent_at = None
+        response.delivered_at = None
+        session.add(response)
+        session.commit()
         try:
             result = whatsapp.send_text(vendor.phone, response.message_text)
+            if (
+                settings.whatsapp_provider == "twilio"
+                and isinstance(result, dict)
+                and not result.get("dry_run")
+                and not result.get("blocked")
+            ):
+                sid = result.get("sid")
+                if isinstance(sid, str) and sid:
+                    response.twilio_message_sid = sid
             response.sent_at = utcnow()
             if isinstance(result, dict) and result.get("dry_run"):
                 # Dry-run: treated as sent for flow purposes, flagged in the error field.
@@ -222,6 +237,7 @@ def send_outreach(
                 response.last_error = "dry_run"
             else:
                 response.status = VendorResponseStatus.SENT.value
+                response.last_error = None
             sent += 1
             sent_in_batch += 1
         except Exception as exc:

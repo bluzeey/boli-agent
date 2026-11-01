@@ -481,6 +481,9 @@ class ProcurementOrchestrator:
     def _handle_followup(
         self, session: Session, sender: str, normalized: str, active_case: ProcurementCase
     ) -> ProcurementCase:
+        if not self.settings.allow_outreach:
+            self.whatsapp.send_text(sender, "Outreach is disabled. No vendor follow-up was sent.")
+            return active_case
         result = parse_selection(normalized[len("followup ") :], 1_000_000)
         if not result.positions:
             self.whatsapp.send_text(

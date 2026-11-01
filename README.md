@@ -77,20 +77,30 @@ and drafts a purchase order. It does **not** yet:
 cp .env.example .env
 ```
 
-For a local dry run, keep:
+For a local browser demo, use:
 
 ```env
 WHATSAPP_PROVIDER=twilio
 PROCESS_INLINE=true
 SEARCH_PROVIDER=mock
+ALLOW_OUTREACH=false
 ```
 
-This requires no Twilio, Sarvam, Google, Redis, or PostgreSQL credentials. Outbound WhatsApp messages are logged as dry-run messages.
+Open `/chat` on the same backend origin. Browser assistant replies are stored in
+the transcript without sending WhatsApp messages. Leave `SARVAM_API_KEY` unset
+for the local heuristic parser; use mock search to avoid search-provider calls.
+
+`ALLOW_OUTREACH=false` blocks **all external WhatsApp sends and read receipts**,
+including buyer replies, vendor acknowledgements and follow-ups. It preserves
+browser transcript replies. It does not disable inbound processing, Sarvam or
+Google Places calls when those integrations are configured. Enable external
+WhatsApp messaging explicitly only when intended.
 
 ### 2. Install and run
 
 ```bash
 make install
+make migrate
 make dev
 ```
 
@@ -100,18 +110,25 @@ Health check:
 curl http://localhost:8000/health
 ```
 
-### 3. Simulate a WhatsApp webhook
+`/health` is a static liveness check; it does not verify database migrations,
+Redis or worker readiness. The deployment command in `railway.toml` requires
+`python -m alembic upgrade head` to succeed before starting Gunicorn. A failed
+migration stops startup. Run migrations before a manually launched development
+server as shown above.
 
-The default provider is Twilio, which posts form-encoded data:
+### 3. Exercise webhook handling offline
+
+Unsigned webhook curl demos, including `scripts/sample_twilio_webhook.sh`, are
+now rejected. Missing signing credentials also reject callbacks; there is no
+unsigned development bypass. Use the signed synthetic callback tests instead:
 
 ```bash
-curl -X POST http://localhost:8000/webhooks/twilio/whatsapp \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data 'MessageSid=demo-001&From=whatsapp%3A%2B919999999999&Body=Find+pest+control+vendors+in+Jaipur&NumMedia=0'
+python -m pytest tests/test_webhook_routes.py tests/test_twilio_delivery.py
 ```
 
-The terminal will show the WhatsApp reply in dry-run mode. (The Meta Cloud API
-route at `/webhooks/whatsapp` is also available when `WHATSAPP_PROVIDER=meta`.)
+The tests force disposable SQLite settings before app imports, ignore dotenv
+files, use synthetic clients/signatures and block real HTTP/socket traffic.
+They never send provider messages.
 
 ### 4. Run tests
 
@@ -128,58 +145,53 @@ make up
 
 For Docker, use the PostgreSQL and Redis URLs already present in `.env.example`, and set `PROCESS_INLINE=false`.
 
-## Twilio WhatsApp Sandbox setup (default, prototype)
+## Twilio WhatsApp setup
 
-The default `WHATSAPP_PROVIDER=twilio` path uses the Twilio Sandbox so you can
-test the full WhatsApp flow without the Meta onboarding. See `USER_GUIDE.md`
-Section 5.1 for the complete walkthrough. In short:
+Use `WHATSAPP_PROVIDER=twilio`. Configure these names securely for intentional
+provider use: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_WHATSAPP_FROM`, and `APP_BASE_URL`.
 
-1. Activate the WhatsApp Sandbox in your Twilio console and join it from your
-   personal WhatsApp number.
-2. Configure in `.env`:
+`APP_BASE_URL` must be the exact canonical external HTTPS backend origin,
+including a non-default port if used, without a path prefix or query. Register
+`<canonical-origin>/webhooks/twilio/whatsapp` for inbound POSTs and, when delivery
+callbacks are used, `<canonical-origin>/webhooks/twilio/status` for status POSTs.
+The application reconstructs these exact URLs for signature verification.
+Avoid redirects, callback query parameters and proxy path rewrites.
+`TWILIO_AUTH_TOKEN` is required to validate both routes; missing or invalid
+`X-Twilio-Signature` returns 401 before processing or delivery-state updates.
 
-   ```env
-   WHATSAPP_PROVIDER=twilio
-   TWILIO_ACCOUNT_SID=
-   TWILIO_AUTH_TOKEN=
-   TWILIO_WHATSAPP_FROM=+14155238886
-   APP_BASE_URL=https://YOUR_NGROK_URL.ngrok-free.app
-   ```
+Vendor RFQ sends persist the Twilio response's outbound MessageSid in
+`VendorResponse.twilio_message_sid`. Status callbacks match that exact stored SID,
+never the recipient phone or newest case. The nullable, unique field is added by
+migration `b6e39f8a2c10`; existing rows stay uncorrelated, with no guessed backfill.
+Unmatched callbacks, including callbacks received before the send's SID is
+committed, are acknowledged without mutation. No deferred reconciliation is
+implemented. A resend retires the previous SID before making another attempt.
 
-3. Expose the local server (`ngrok http 8000`) and point the Twilio Sandbox
-   webhook to `https://YOUR_HOST/webhooks/twilio/whatsapp` (HTTP POST).
-4. Send a requirement from your joined WhatsApp number.
+Delivery cannot regress to sent or failed, and a delivery callback cannot
+overwrite a vendor reply or other terminal business state. A delivered callback
+may supersede an earlier failed result for the same SID; duplicate events do
+not rewrite timestamps. Transient database errors return 503.
 
-`TWILIO_AUTH_TOKEN` validates the `X-Twilio-Signature` header (skipped when
-empty, for dev). Empty Twilio credentials → dry-run mode (messages logged).
+Keep `ALLOW_OUTREACH=false` for non-sending checks. With it off, external
+WhatsApp buyer replies and read receipts are also suppressed; browser replies
+continue. `PROCESS_INLINE=false` queues provider inbound processing, while browser
+messages are handled synchronously; it is not a sending kill switch.
 
-## Meta WhatsApp Cloud API setup (production alternate)
+## Meta WhatsApp Cloud API setup
 
-The direct Meta integration is preserved for production. Set
-`WHATSAPP_PROVIDER=meta` and configure:
+Use `WHATSAPP_PROVIDER=meta` and register
+`<canonical-origin>/webhooks/whatsapp` on the same canonical HTTPS backend origin.
+Configure `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`,
+`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, and
+`WHATSAPP_GRAPH_VERSION` securely. Subscribe to the `messages` webhook field.
 
-1. Create a Meta app with a WhatsApp Business Account and phone number.
-2. Set the webhook callback to:
+Verification GET requests require the configured verification token; no default
+token fallback exists. Event POSTs require the configured app secret and a valid
+`X-Hub-Signature-256` over the unchanged raw body. Missing credentials never
+bypass validation. Preserve the signature headers and raw body through the proxy.
 
-   ```text
-   https://YOUR_HOST/webhooks/whatsapp
-   ```
-
-3. Use the same value for Meta's verification token and `WHATSAPP_VERIFY_TOKEN`.
-4. Subscribe the app to the WABA `messages` field.
-5. Configure:
-
-   ```env
-   WHATSAPP_PROVIDER=meta
-   WHATSAPP_ACCESS_TOKEN=
-   WHATSAPP_APP_SECRET=
-   WHATSAPP_PHONE_NUMBER_ID=
-   WHATSAPP_GRAPH_VERSION=
-   ```
-
-These Meta env vars are intentionally omitted from `.env.example`; add them
-only when switching to the Meta provider. Use a publicly reachable HTTPS
-endpoint. During development, a secure tunnel can expose the local server.
+Operator access policy remains a separate deployment decision.
 
 ## Sarvam setup
 

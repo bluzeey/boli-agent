@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     whatsapp_provider: str = "twilio"
-    whatsapp_verify_token: str = "change-me"
+    whatsapp_verify_token: str = ""
     whatsapp_access_token: str = ""
     whatsapp_app_secret: str = ""
     whatsapp_phone_number_id: str = ""

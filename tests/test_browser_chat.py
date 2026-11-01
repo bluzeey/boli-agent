@@ -1,5 +1,3 @@
-import os
-
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -9,7 +7,7 @@ from app.models import Base, ChatMessage, Conversation, ProcurementCase
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 
     import app.api.browser_chat as browser_chat
@@ -17,7 +15,7 @@ def client(monkeypatch):
     import app.main
 
     test_engine = create_engine(
-        "sqlite:///./test_boli_chat.db", connect_args={"check_same_thread": False}
+        f"sqlite:///{tmp_path / 'chat.db'}", connect_args={"check_same_thread": False}
     )
     Base.metadata.create_all(test_engine)
     monkeypatch.setattr(db_module, "engine", test_engine)
@@ -32,8 +30,7 @@ def client(monkeypatch):
     with TestClient(app.main.app) as c:
         yield c, test_engine
     Base.metadata.drop_all(test_engine)
-    if os.path.exists("./test_boli_chat.db"):
-        os.remove("./test_boli_chat.db")
+    test_engine.dispose()
 
 
 def _build_test_processor(engine):
@@ -78,7 +75,7 @@ def _build_test_processor(engine):
 
     whatsapp = CapturingWhatsApp()
     from app.integrations.hybrid_whatsapp import HybridWhatsAppClient
-    hybrid = HybridWhatsAppClient(whatsapp)
+    hybrid = HybridWhatsAppClient(whatsapp, settings)
 
     sarvam = FakeSarvam()
     search = FakeSearchProvider()
