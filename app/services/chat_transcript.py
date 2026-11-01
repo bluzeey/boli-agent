@@ -122,7 +122,7 @@ def list_messages(session: Session, conversation_id: str) -> list[ChatMessage]:
     ).all()
 
 
-def delete_session(session: Session, sender: str) -> bool:
+def delete_session(session: Session, sender: str, *, commit: bool = True) -> bool:
     """Delete a browser chat session and all related data.
 
     Cascade-deletes in FK-safe order:
@@ -163,7 +163,10 @@ def delete_session(session: Session, sender: str) -> bool:
         )
 
     session.execute(delete(Conversation).where(Conversation.id == conv_id))
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
     logger.info("delete_session: deleted conversation=%s (%d cases)", conv_id, len(case_ids))
     return True

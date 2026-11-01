@@ -2,7 +2,18 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -26,6 +37,24 @@ def ensure_aware(dt: datetime | None) -> datetime | None:
 
 class Base(DeclarativeBase):
     pass
+
+
+class BrowserOwner(Base):
+    __tablename__ = "browser_owners"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserSession(Base):
+    __tablename__ = "browser_sessions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    owner_hash: Mapped[str] = mapped_column(
+        String(64), ForeignKey("browser_owners.token_hash"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class CaseStatus(StrEnum):
@@ -134,9 +163,7 @@ class ProcurementCase(Base):
     conversation_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("conversations.id"), index=True
     )
-    status: Mapped[str] = mapped_column(
-        String(32), default=CaseStatus.NEW.value, index=True
-    )
+    status: Mapped[str] = mapped_column(String(32), default=CaseStatus.NEW.value, index=True)
     category: Mapped[str] = mapped_column(String(32), default="generic", index=True)
     raw_request: Mapped[str] = mapped_column(Text, default="")
     request_type: Mapped[str] = mapped_column(String(32), default="unknown")
@@ -178,9 +205,7 @@ class SearchRun(Base):
     __tablename__ = "search_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("procurement_cases.id"), index=True
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("procurement_cases.id"), index=True)
     provider: Mapped[str] = mapped_column(String(64))
     query: Mapped[str] = mapped_column(Text)
     result_count: Mapped[int] = mapped_column(default=0)
@@ -199,12 +224,8 @@ class VendorCandidate(Base):
     __tablename__ = "vendor_candidates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    search_run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("search_runs.id"), index=True
-    )
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("procurement_cases.id"), index=True
-    )
+    search_run_id: Mapped[str] = mapped_column(String(36), ForeignKey("search_runs.id"), index=True)
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("procurement_cases.id"), index=True)
     external_id: Mapped[str] = mapped_column(String(256), index=True)
     provider: Mapped[str] = mapped_column(String(64))
     position: Mapped[int] = mapped_column(Integer, index=True)
@@ -227,9 +248,7 @@ class Rfq(Base):
     __tablename__ = "rfqs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("procurement_cases.id"), index=True
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("procurement_cases.id"), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     document_text: Mapped[str] = mapped_column(Text)
     fields_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -250,9 +269,13 @@ class Vendor(Base):
     """
 
     __tablename__ = "vendors"
+    __table_args__ = (
+        UniqueConstraint("owner_scope", "external_id", name="uq_vendor_owner_external"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    external_id: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    owner_scope: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    external_id: Mapped[str] = mapped_column(String(256), index=True)
     name: Mapped[str] = mapped_column(String(512))
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     email: Mapped[str | None] = mapped_column(String(256), nullable=True)
@@ -278,12 +301,8 @@ class VendorResponse(Base):
     __tablename__ = "vendor_responses"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    case_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("procurement_cases.id"), index=True
-    )
-    vendor_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("vendors.id"), index=True
-    )
+    case_id: Mapped[str] = mapped_column(String(36), ForeignKey("procurement_cases.id"), index=True)
+    vendor_id: Mapped[str] = mapped_column(String(36), ForeignKey("vendors.id"), index=True)
     rfq_id: Mapped[str] = mapped_column(String(36), ForeignKey("rfqs.id"), index=True)
     rfq_version: Mapped[int] = mapped_column(Integer, default=1)
     channel: Mapped[str] = mapped_column(String(32), default=OutreachChannel.WHATSAPP.value)
@@ -291,6 +310,9 @@ class VendorResponse(Base):
         String(32), default=VendorResponseStatus.QUEUED.value, index=True
     )
     message_text: Mapped[str] = mapped_column(Text, default="")
+    twilio_message_sid: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     response_deadline: Mapped[str | None] = mapped_column(String(256), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

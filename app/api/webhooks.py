@@ -1,10 +1,11 @@
+import hmac
 import json
 import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -13,10 +14,9 @@ from app.db import SessionLocal, engine
 from app.integrations.twilio import extract_twilio_inbound, verify_twilio_signature
 from app.integrations.whatsapp import (
     extract_inbound_messages,
-    normalize_phone,
     verify_whatsapp_signature,
 )
-from app.models import ProcurementCase, Vendor, VendorResponse, VendorResponseStatus
+from app.models import VendorResponse, VendorResponseStatus
 
 logger = logging.getLogger("boli.webhooks")
 
@@ -66,7 +66,13 @@ def verify_webhook(
     hub_challenge: str = Query(alias="hub.challenge"),
 ) -> Response:
     logger.info("meta GET verify: hub.mode=%s", hub_mode)
-    if hub_mode != "subscribe" or hub_verify_token != settings.whatsapp_verify_token:
+    if (
+        not settings.whatsapp_verify_token.strip()
+        or hub_mode != "subscribe"
+        or not hmac.compare_digest(
+            hub_verify_token.encode(), settings.whatsapp_verify_token.encode()
+        )
+    ):
         logger.warning("meta GET verify: FAILED (token mismatch)")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid verify token")
     logger.info("meta GET verify: OK, returning challenge")
@@ -112,24 +118,7 @@ async def receive_twilio_webhook(request: Request) -> dict[str, str]:
         {k: (v[:100] if isinstance(v, str) and len(v) > 100 else v) for k, v in form.items()},
     )
 
-    signature = request.headers.get("x-twilio-signature")
-    logger.info(
-        "twilio POST: signature present=%s, auth_token set=%s",
-        bool(signature),
-        bool(settings.twilio_auth_token),
-    )
-
-    base = settings.app_base_url.rstrip("/")
-    webhook_url = f"{base}/webhooks/twilio/whatsapp"
-    logger.info("twilio POST: reconstructed webhook_url=%s", webhook_url)
-
-    if not verify_twilio_signature(webhook_url, form, signature, settings.twilio_auth_token):
-        logger.warning(
-            "twilio POST: signature verification FAILED (url=%s, signature=%s)",
-            webhook_url,
-            signature,
-        )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
+    _require_twilio_signature(request, form, "/webhooks/twilio/whatsapp")
     logger.info("twilio POST: signature verification OK")
 
     messages = extract_twilio_inbound(form)
@@ -150,11 +139,12 @@ async def receive_twilio_webhook(request: Request) -> dict[str, str]:
     return {"status": "accepted"}
 
 
-_ACTIVE_OUTREACH_STATES = {
-    "outreach_approved",
-    "outreach_in_progress",
-    "collecting_responses",
-}
+def _require_twilio_signature(request: Request, form: dict, path: str) -> None:
+    webhook_url = f"{settings.app_base_url.rstrip('/')}{path}"
+    if not verify_twilio_signature(
+        webhook_url, form, request.headers.get("x-twilio-signature"), settings.twilio_auth_token
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
 
 
 @twilio_router.post("/status")
@@ -162,10 +152,11 @@ async def receive_twilio_status(request: Request) -> dict[str, str]:
     """Receive Twilio delivery status callbacks for outbound messages.
 
     Twilio posts form-encoded fields: MessageSid, MessageStatus, To, From,
-    ErrorCode, ErrorMessage, etc.  We log every callback and best-effort
-    update the matching VendorResponse row.
+    ErrorCode, ErrorMessage, etc. Only a persisted outbound MessageSid can
+    identify a response. Phone numbers and case recency are not correlation keys.
     """
     form = dict(await request.form())
+    _require_twilio_signature(request, form, "/webhooks/twilio/status")
     message_sid = form.get("MessageSid", "")
     message_status = form.get("MessageStatus", "")
     to_number = form.get("To", "")
@@ -181,52 +172,46 @@ async def receive_twilio_status(request: Request) -> dict[str, str]:
         error_message,
     )
 
-    # Best-effort: match the recipient phone to a VendorResponse on an active case.
-    to_digits = normalize_phone(to_number)
-    if to_digits:
-        try:
-            with SessionLocal() as session:
-                rows = session.execute(
-                    select(VendorResponse, Vendor, ProcurementCase)
-                    .join(Vendor, VendorResponse.vendor_id == Vendor.id)
-                    .join(ProcurementCase, ProcurementCase.id == VendorResponse.case_id)
-                    .where(ProcurementCase.status.in_(_ACTIVE_OUTREACH_STATES))
-                    .order_by(VendorResponse.updated_at.desc())
-                ).all()
+    if not message_sid or message_status not in {"delivered", "failed", "undelivered"}:
+        # Send acceptance already persists SENT; duplicates and unsupported statuses are no-ops.
+        return {"status": "received"}
 
-                matched = False
-                for response, vendor, case in rows:
-                    if normalize_phone(vendor.phone) == to_digits:
-                        now = datetime.now(UTC)
-                        if message_status == "sent":
-                            response.sent_at = now
-                            response.status = VendorResponseStatus.SENT.value
-                        elif message_status == "delivered":
-                            response.delivered_at = now
-                            response.status = VendorResponseStatus.DELIVERED.value
-                        elif message_status in ("failed", "undelivered"):
-                            response.status = VendorResponseStatus.FAILED.value
-                            response.last_error = f"Twilio: {error_message or message_status}"
-                        response.updated_at = now
-                        session.add(response)
-                        session.commit()
-                        logger.info(
-                            "twilio STATUS: matched VendorResponse id=%s case_id=%s "
-                            "vendor=%s -> status=%s",
-                            response.id,
-                            case.id,
-                            vendor.name,
-                            response.status,
-                        )
-                        matched = True
-                        break
+    now = datetime.now(UTC)
+    if message_status == "delivered":
+        # Delivery is stronger evidence than an earlier failure, but never supersedes a reply.
+        previous_states = [VendorResponseStatus.SENT.value, VendorResponseStatus.FAILED.value]
+        changes = {
+            "status": VendorResponseStatus.DELIVERED.value,
+            "delivered_at": now,
+            "last_error": None,
+        }
+    else:
+        previous_states = [VendorResponseStatus.SENT.value]
+        changes = {
+            "status": VendorResponseStatus.FAILED.value,
+            "last_error": f"Twilio: {error_message or message_status}",
+        }
 
-                if not matched:
-                    logger.info(
-                        "twilio STATUS: no matching VendorResponse for To=%s",
-                        to_number,
-                    )
-        except Exception as exc:
-            logger.exception("twilio STATUS: error updating VendorResponse: %s", exc)
+    try:
+        with SessionLocal.begin() as session:
+            # A single conditional UPDATE also protects against concurrent reply/status commits.
+            result = session.execute(
+                update(VendorResponse)
+                .where(
+                    VendorResponse.twilio_message_sid == message_sid,
+                    VendorResponse.status.in_(previous_states),
+                    VendorResponse.responded_at.is_(None),
+                    VendorResponse.delivered_at.is_(None),
+                )
+                .values(**changes, updated_at=now)
+            )
+            if not result.rowcount:
+                logger.info("twilio STATUS: ignored unknown SID or already advanced response")
+    except Exception as exc:
+        logger.exception("twilio STATUS: error updating delivery state")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Delivery status temporarily unavailable",
+        ) from exc
 
     return {"status": "received"}

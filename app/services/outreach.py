@@ -22,6 +22,7 @@ from app.models import (
     VendorResponseStatus,
 )
 from app.services.rfq import case_snapshot
+from app.services.vendor_scope import vendor_scope_for_case
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,12 @@ def _default_consent(provider: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def _upsert_vendor(session: Session, candidate: VendorCandidate) -> Vendor:
+def _upsert_vendor(session: Session, candidate: VendorCandidate, owner_scope: str) -> Vendor:
     existing = session.scalars(
-        select(Vendor).where(Vendor.external_id == candidate.external_id)
+        select(Vendor).where(
+            Vendor.external_id == candidate.external_id,
+            Vendor.owner_scope == owner_scope,
+        )
     ).first()
     now = utcnow()
     if existing:
@@ -64,6 +68,7 @@ def _upsert_vendor(session: Session, candidate: VendorCandidate) -> Vendor:
 
     consent, source = _default_consent(candidate.provider)
     vendor = Vendor(
+        owner_scope=owner_scope,
         external_id=candidate.external_id,
         name=candidate.name,
         phone=candidate.phone,
@@ -99,9 +104,12 @@ def prepare_outreach(
 ) -> list[VendorResponse]:
     """Create queued VendorResponse rows for each confirmed candidate.
 
-    Upserts durable Vendor records (preserving cross-case consent) and renders a
+    Upserts durable Vendor records (preserving consent within one owner) and renders a
     vendor-facing RFQ message per recipient. No message is sent here.
     """
+    owner_scope = vendor_scope_for_case(session, procurement_case)
+    if rfq.case_id != procurement_case.id:
+        raise ValueError("RFQ does not belong to the outreach case")
     pack = get_category_pack(procurement_case.category)
     snapshot = case_snapshot(procurement_case)
 
@@ -116,7 +124,7 @@ def prepare_outreach(
 
     responses: list[VendorResponse] = []
     for candidate in confirmed:
-        vendor = _upsert_vendor(session, candidate)
+        vendor = _upsert_vendor(session, candidate, owner_scope)
         message_text = pack.render_vendor_rfq(snapshot, vendor.name)
         response = VendorResponse(
             case_id=procurement_case.id,
@@ -147,6 +155,7 @@ def send_outreach(
     ).first()
     if not procurement_case:
         raise ValueError(f"Case {case_id} not found")
+    owner_scope = vendor_scope_for_case(session, procurement_case)
 
     responses = list(
         session.scalars(
@@ -169,11 +178,14 @@ def send_outreach(
 
     for response in responses:
         vendor = session.scalars(
-            select(Vendor).where(Vendor.id == response.vendor_id)
+            select(Vendor).where(
+                Vendor.id == response.vendor_id,
+                Vendor.owner_scope == owner_scope,
+            )
         ).first()
         if not vendor:
             response.status = VendorResponseStatus.FAILED.value
-            response.last_error = "Vendor record missing"
+            response.last_error = "Vendor record missing or outside case owner scope"
             response.attempts += 1
             failed += 1
             session.add(response)
@@ -213,8 +225,23 @@ def send_outreach(
             sleep(settings.outbound_rate_delay_seconds)
 
         response.attempts += 1
+        # Retire the previous attempt's correlation before making another send.
+        response.twilio_message_sid = None
+        response.sent_at = None
+        response.delivered_at = None
+        session.add(response)
+        session.commit()
         try:
             result = whatsapp.send_text(vendor.phone, response.message_text)
+            if (
+                settings.whatsapp_provider == "twilio"
+                and isinstance(result, dict)
+                and not result.get("dry_run")
+                and not result.get("blocked")
+            ):
+                sid = result.get("sid")
+                if isinstance(sid, str) and sid:
+                    response.twilio_message_sid = sid
             response.sent_at = utcnow()
             if isinstance(result, dict) and result.get("dry_run"):
                 # Dry-run: treated as sent for flow purposes, flagged in the error field.
@@ -222,6 +249,7 @@ def send_outreach(
                 response.last_error = "dry_run"
             else:
                 response.status = VendorResponseStatus.SENT.value
+                response.last_error = None
             sent += 1
             sent_in_batch += 1
         except Exception as exc:

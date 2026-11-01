@@ -300,6 +300,7 @@ body {
       <div class="title">Boli Chats</div>
       <button class="new-chat-btn" id="new-chat-btn" title="New chat">+</button>
     </div>
+    <p style="margin:0;padding:10px 16px;font-size:12px;color:var(--text-secondary)">Private to this browser. Access lasts 30 days; clearing cookies removes access.</p>
     <div class="chat-list-items" id="chat-list-items">
       <div class="chat-list-empty">No chats yet. Click + to start.</div>
     </div>
@@ -348,7 +349,6 @@ body {
 
 <script>
 const API_BASE = window.location.origin;
-const STORAGE_KEY = 'boli_chat_sessions';
 
 let sessions = [];        // [{session_id, preview, case_status, updated_at}]
 let activeSessionId = null;
@@ -379,21 +379,14 @@ const errorTextEl = document.getElementById('error-text');
 const closeErrBtn = document.getElementById('close-err');
 const vendorCountEl = document.getElementById('vendor-count');
 
-// ===== Session storage =====
-function loadSessions() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); sessions = raw ? JSON.parse(raw) : []; }
-  catch { sessions = []; }
-}
-function saveSessions() { localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); }
+// Chat ownership and history come from the server's private browser cookie.
 function updateSessionMeta(sessionId, preview, caseStatus) {
   const s = sessions.find(x => x.session_id === sessionId);
   if (s) { s.preview = preview || s.preview; s.case_status = caseStatus || s.case_status; s.updated_at = Date.now(); }
   else { sessions.push({ session_id: sessionId, preview: preview || '', case_status: caseStatus || null, updated_at: Date.now() }); }
-  saveSessions();
 }
 function removeSession(sessionId) {
   sessions = sessions.filter(s => s.session_id !== sessionId);
-  saveSessions();
 }
 
 // ===== Error display =====
@@ -451,7 +444,6 @@ async function createNewSession() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     sessions.push({ session_id: data.session_id, preview: '', case_status: null, updated_at: Date.now() });
-    saveSessions();
     switchSession(data.session_id);
     renderChatList();
   } catch (e) {
@@ -511,20 +503,22 @@ async function sendMessage() {
   if (!text || isSending || !activeSessionId) return;
   isSending = true; sendBtn.disabled = true; inputEl.value = '';
   typingEl.classList.add('show'); scrollToBottom();
+  const sentSessionId = activeSessionId;
   const clientMessageId = 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   try {
     const res = await fetch(`${API_BASE}/api/browser-chat/messages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, session_id: activeSessionId, client_message_id: clientMessageId }),
+      body: JSON.stringify({ text, session_id: sentSessionId, client_message_id: clientMessageId }),
     });
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(errBody.detail || `HTTP ${res.status}`);
     }
     const data = await res.json();
+    updateSessionMeta(sentSessionId, text, data.case_status);
+    if (activeSessionId !== sentSessionId) { renderChatList(); return; }
     renderTranscript(data);
     maybeFetchCasePanel(data.active_case_id, data.case_status);
-    updateSessionMeta(activeSessionId, text, data.case_status);
     renderChatList();
     pollFailCount = 0;
   } catch (e) {
@@ -606,7 +600,7 @@ function updateHeader(data) {
   if (data && data.case_status) {
     caseStatusBadgeEl.textContent = data.case_status.replace(/_/g, ' ');
     caseStatusBadgeEl.classList.add('active');
-    statusTextEl.textContent = 'processing';
+    statusTextEl.textContent = ['searching','outreach_in_progress'].includes(data.case_status) ? 'processing' : 'online';
   } else {
     caseStatusBadgeEl.textContent = 'Ready';
     caseStatusBadgeEl.classList.remove('active');
@@ -652,11 +646,13 @@ function updateErrorsPanel(errorMsgs) {
 
 async function fetchCasePanel(caseId) {
   if (!caseId) return;
+  const panelSessionId = activeSessionId;
   try {
     const [caseRes, candRes] = await Promise.all([
       fetch(`${API_BASE}/api/cases/${caseId}`).then(r => r.ok ? r.json() : null),
       fetch(`${API_BASE}/api/cases/${caseId}/candidates`).then(r => r.ok ? r.json() : []),
     ]);
+    if (activeSessionId !== panelSessionId) return;
     renderCaseDetails(caseRes);
     renderVendorList(candRes);
     if (caseRes) {
@@ -697,25 +693,45 @@ function renderVendorList(candidates) {
         ${c.expired ? '<span class="pill expired">expired</span>' : ''}
       </div>
       <div class="v-meta">${esc(c.phone || 'No phone')} ${c.rating ? '&bull; &#9733; ' + c.rating : ''} ${c.review_count ? '(' + c.review_count + ')' : ''}</div>
-      ${c.website ? `<div class="v-meta"><a href="${esc(c.website)}" target="_blank" style="color:var(--link)">${esc(c.website)}</a></div>` : ''}
     </div>`).join('');
+  const cards = el.querySelectorAll('.vendor-card');
+  candidates.forEach((candidate, index) => {
+    if (!candidate.website) return;
+    let url;
+    try { url = new URL(candidate.website); } catch { return; }
+    if (!['http:', 'https:'].includes(url.protocol)) return;
+    const line = document.createElement('div');
+    line.className = 'v-meta';
+    const link = document.createElement('a');
+    link.href = url.href;
+    link.textContent = candidate.website;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.style.color = 'var(--link)';
+    line.appendChild(link);
+    cards[index].appendChild(line);
+  });
 }
 
 async function fetchRfq(caseId) {
+  const panelSessionId = activeSessionId;
   try {
     const res = await fetch(`${API_BASE}/api/cases/${caseId}/rfq`);
     if (!res.ok) return;
     const rfq = await res.json();
+    if (activeSessionId !== panelSessionId) return;
     document.getElementById('rfq-panel').innerHTML = `<div class="rfq-text">${escapeHtml(rfq.document_text)}</div>`;
   } catch {}
 }
 
 async function fetchVendorResponses(caseId) {
+  const panelSessionId = activeSessionId;
   try {
     const [vRes, rRes] = await Promise.all([
       fetch(`${API_BASE}/api/cases/${caseId}/vendors`).then(r => r.ok ? r.json() : []),
       fetch(`${API_BASE}/api/cases/${caseId}/responses`).then(r => r.ok ? r.json() : []),
     ]);
+    if (activeSessionId !== panelSessionId) return;
     const el = document.getElementById('vendor-responses');
     if (!vRes || vRes.length === 0) { el.innerHTML = '<div class="empty-state">No outreach yet</div>'; return; }
     el.innerHTML = vRes.map(v => {
@@ -739,10 +755,12 @@ async function fetchVendorResponses(caseId) {
 }
 
 async function fetchDocument(caseId) {
+  const panelSessionId = activeSessionId;
   try {
     const res = await fetch(`${API_BASE}/api/cases/${caseId}/document`);
     if (!res.ok) return;
     const doc = await res.json();
+    if (activeSessionId !== panelSessionId) return;
     document.getElementById('doc-panel').innerHTML = `<div class="doc-text">${escapeHtml(doc.document)}</div>`;
   } catch {}
 }
@@ -774,7 +792,15 @@ panelCloseBtn.addEventListener('click', () => casePanelEl.classList.remove('show
 
 // ===== Init =====
 async function init() {
-  loadSessions();
+  // Remove metadata left by the earlier client, which had no ownership boundary.
+  try { localStorage.removeItem('boli_chat_sessions'); } catch {}
+  try {
+    const res = await fetch(`${API_BASE}/api/browser-chat/sessions`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    sessions = (data.sessions || []).map(s => ({...s, updated_at: Date.parse(s.updated_at) || 0}));
+    sessions.sort((a, b) => b.updated_at - a.updated_at);
+  } catch { showError('Could not load private chats. Please reload.'); return; }
   if (sessions.length === 0) {
     await createNewSession();
   } else {

@@ -36,12 +36,9 @@ def verify_twilio_signature(
     """Validate Twilio's X-Twilio-Signature header.
 
     Twilio signs ``url + sorted(key+value)`` with HMAC-SHA1 using the auth token,
-    base64-encoded. When ``auth_token`` is empty, validation is skipped (dev escape
-    hatch, mirroring the Meta adapter).
+    base64-encoded. Missing signing credentials always reject the request.
     """
-    if not auth_token:
-        return True
-    if not signature:
+    if not auth_token.strip() or not signature:
         return False
     sorted_items = sorted(params.items())
     concatenated = url + "".join(f"{k}{v}" for k, v in sorted_items)
@@ -49,7 +46,7 @@ def verify_twilio_signature(
         auth_token.encode("utf-8"), concatenated.encode("utf-8"), hashlib.sha1
     ).digest()
     expected = base64.b64encode(digest).decode("utf-8")
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode())
 
 
 def extract_twilio_inbound(form: dict[str, Any]) -> list[InboundWhatsAppMessage]:
@@ -114,6 +111,8 @@ class TwilioWhatsAppClient:
         )
 
     def send_text(self, to: str, body: str) -> dict[str, Any]:
+        if not self.settings.allow_outreach:
+            return {"blocked": True, "reason": "outreach_disabled"}
         body = body[: self.settings.max_message_chars]
         if not self._has_credentials():
             logger.warning("Twilio credentials missing; dry-run message to %s: %s", to, body)

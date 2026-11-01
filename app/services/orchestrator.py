@@ -2,7 +2,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -23,7 +23,7 @@ from app.models import (
 )
 from app.schemas import SearchResult
 from app.search.base import SearchProvider
-from app.services.comparison import build_comparison
+from app.services.comparison import ComparisonResult, build_comparison
 from app.services.completeness import missing_required_fields, render_followup_question
 from app.services.documents import generate_document
 from app.services.formatting import (
@@ -40,6 +40,7 @@ from app.services.formatting import (
 from app.services.outreach import prepare_outreach, send_outreach
 from app.services.rfq import generate_rfq, latest_rfq
 from app.services.selection import is_affirmative, is_negative, parse_selection
+from app.services.vendor_scope import VendorScopeError, vendor_scope_for_case
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,12 @@ class ProcurementOrchestrator:
         self, session: Session, sender: str, text: str, active_case: ProcurementCase
     ) -> ProcurementCase:
         if is_affirmative(text):
+            if not self.settings.allow_outreach:
+                self.whatsapp.send_text(
+                    sender,
+                    "External messaging is disabled. Your RFQ is saved; no vendors were contacted.",
+                )
+                return active_case
             rfq = latest_rfq(session, active_case.id)
             now = utcnow()
             if rfq:
@@ -375,7 +382,7 @@ class ProcurementOrchestrator:
             return active_case
 
         if normalized == "compare":
-            comparison = build_comparison(session, active_case)
+            comparison = self._scoped_comparison(session, active_case)
             self.whatsapp.send_text(sender, render_comparison(comparison))
             return active_case
 
@@ -424,6 +431,7 @@ class ProcurementOrchestrator:
     def _vendor_response_for_position(
         self, session: Session, case_id: str, position: int
     ) -> tuple[Vendor, VendorResponse] | None:
+        owner_scope = vendor_scope_for_case(session, case_id)
         candidate = session.scalars(
             select(VendorCandidate).where(
                 VendorCandidate.case_id == case_id,
@@ -433,7 +441,10 @@ class ProcurementOrchestrator:
         if not candidate:
             return None
         vendor = session.scalars(
-            select(Vendor).where(Vendor.external_id == candidate.external_id)
+            select(Vendor).where(
+                Vendor.external_id == candidate.external_id,
+                Vendor.owner_scope == owner_scope,
+            )
         ).first()
         if not vendor:
             return None
@@ -481,6 +492,9 @@ class ProcurementOrchestrator:
     def _handle_followup(
         self, session: Session, sender: str, normalized: str, active_case: ProcurementCase
     ) -> ProcurementCase:
+        if not self.settings.allow_outreach:
+            self.whatsapp.send_text(sender, "Outreach is disabled. No vendor follow-up was sent.")
+            return active_case
         result = parse_selection(normalized[len("followup ") :], 1_000_000)
         if not result.positions:
             self.whatsapp.send_text(
@@ -518,7 +532,19 @@ class ProcurementOrchestrator:
                 "to generate the draft.",
             )
             return active_case
-        comparison = build_comparison(session, active_case)
+        owner_scope = vendor_scope_for_case(session, active_case)
+        vendor = session.scalars(
+            select(Vendor).where(
+                Vendor.id == active_case.selected_vendor_id,
+                Vendor.owner_scope == owner_scope,
+            )
+        ).first()
+        if vendor is None:
+            self.whatsapp.send_text(
+                sender, "Could not find the selected vendor's bid. Reply *compare*."
+            )
+            return active_case
+        comparison = self._scoped_comparison(session, active_case)
         bid = next(
             (b for b in comparison.bids if b.vendor_id == active_case.selected_vendor_id),
             None,
@@ -528,9 +554,6 @@ class ProcurementOrchestrator:
                 sender, "Could not find the selected vendor's bid. Reply *compare*."
             )
             return active_case
-        vendor = session.scalars(
-            select(Vendor).where(Vendor.id == active_case.selected_vendor_id)
-        ).first()
         rfq = latest_rfq(session, active_case.id)
         document = generate_document(active_case, bid, vendor, rfq)
         active_case.document_text = document
@@ -547,9 +570,15 @@ class ProcurementOrchestrator:
         return active_case
 
     def _case_status_stats(self, session: Session, case_id: str) -> dict:
+        owner_scope = vendor_scope_for_case(session, case_id)
         responses = list(
             session.scalars(
-                select(VendorResponse).where(VendorResponse.case_id == case_id)
+                select(VendorResponse)
+                .join(Vendor, Vendor.id == VendorResponse.vendor_id)
+                .where(
+                    VendorResponse.case_id == case_id,
+                    Vendor.owner_scope == owner_scope,
+                )
             )
         )
         sent = responded = skipped = failed = pending = 0
@@ -582,38 +611,20 @@ class ProcurementOrchestrator:
         self, session: Session, case_id: str, positions: list[int]
     ) -> int:
         """Grant buyer-confirmed consent to vendors by original shortlist position."""
-        candidates = {
-            c.position: c
-            for c in session.scalars(
-                select(VendorCandidate).where(VendorCandidate.case_id == case_id)
-            )
-        }
         now = utcnow()
         granted = 0
-        for position in positions:
-            candidate = candidates.get(position)
-            if not candidate:
+        for position in dict.fromkeys(positions):
+            match = self._vendor_response_for_position(session, case_id, position)
+            if not match:
                 continue
-            vendor = session.scalars(
-                select(Vendor).where(Vendor.external_id == candidate.external_id)
-            ).first()
-            if not vendor:
-                continue
+            vendor, response = match
             vendor.contact_consent = True
             vendor.consent_source = ConsentSource.BUYER_CONFIRMED.value
             vendor.consented_at = now
             vendor.updated_at = now
             session.add(vendor)
             # Re-queue any skipped/failed response for this vendor on this case.
-            response = session.scalars(
-                select(VendorResponse)
-                .where(
-                    VendorResponse.case_id == case_id,
-                    VendorResponse.vendor_id == vendor.id,
-                )
-                .order_by(VendorResponse.created_at.desc())
-            ).first()
-            if response and response.status in {
+            if response.status in {
                 VendorResponseStatus.SKIPPED_COLD.value,
                 VendorResponseStatus.FAILED.value,
             }:
@@ -626,6 +637,22 @@ class ProcurementOrchestrator:
         return granted
 
     # -- Queries / helpers -------------------------------------------------
+
+    def _scoped_comparison(
+        self, session: Session, case: ProcurementCase
+    ) -> ComparisonResult:
+        owner_scope = vendor_scope_for_case(session, case)
+        invalid_response = session.scalars(
+            select(VendorResponse.id)
+            .outerjoin(Vendor, Vendor.id == VendorResponse.vendor_id)
+            .where(
+                VendorResponse.case_id == case.id,
+                or_(Vendor.owner_scope.is_(None), Vendor.owner_scope != owner_scope),
+            )
+        ).first()
+        if invalid_response is not None:
+            raise VendorScopeError("Case has a vendor response outside its owner scope")
+        return build_comparison(session, case)
 
     def _active_candidates(self, session: Session, case_id: str) -> list[VendorCandidate]:
         return list(

@@ -13,8 +13,8 @@ def build_whatsapp_client(settings: Settings | None = None) -> WhatsAppClient:
     if settings.whatsapp_provider == "twilio":
         from app.integrations.twilio import TwilioWhatsAppClient
 
-        return HybridWhatsAppClient(TwilioWhatsAppClient(settings))  # type: ignore[return-value]
-    return HybridWhatsAppClient(WhatsAppClient(settings))  # type: ignore[return-value]
+        return HybridWhatsAppClient(TwilioWhatsAppClient(settings), settings)  # type: ignore[return-value]
+    return HybridWhatsAppClient(WhatsAppClient(settings), settings)  # type: ignore[return-value]
 
 
 def build_webhook_processor(settings: Settings | None = None) -> WhatsAppWebhookProcessor:

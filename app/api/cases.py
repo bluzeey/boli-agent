@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.browser_access import require_private_case, throttle_case_mutation
 from app.db import get_session
 from app.models import (
     CaseStatus,
@@ -32,8 +33,25 @@ from app.schemas import (
 )
 from app.services.outreach import prepare_outreach, send_outreach
 from app.services.rfq import generate_rfq, latest_rfq
+from app.services.vendor_scope import vendor_scope_for_case
 
-router = APIRouter(prefix="/api/cases", tags=["cases"])
+router = APIRouter(
+    prefix="/api/cases",
+    tags=["cases"],
+    dependencies=[
+        Depends(require_private_case),
+        Depends(throttle_case_mutation),
+    ],
+)
+
+
+def _require_outreach_enabled() -> None:
+    from app.config import get_settings
+
+    if not get_settings().allow_outreach:
+        raise HTTPException(
+            status_code=409, detail="External messaging is disabled; your RFQ stays saved"
+        )
 
 
 def _get_case_or_404(session: Session, case_id: str) -> ProcurementCase:
@@ -127,10 +145,7 @@ def set_shortlist(
     if invalid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Invalid selection: {invalid}. Valid positions are "
-                f"{sorted(position_map)}."
-            ),
+            detail=(f"Invalid selection: {invalid}. Valid positions are {sorted(position_map)}."),
         )
 
     now = datetime.now(UTC)
@@ -154,9 +169,7 @@ def set_shortlist(
 
 
 @router.post("/{case_id}/rfq", response_model=RfqGenerateResponse)
-def generate_case_rfq(
-    case_id: str, session: Session = Depends(get_session)
-) -> RfqGenerateResponse:
+def generate_case_rfq(case_id: str, session: Session = Depends(get_session)) -> RfqGenerateResponse:
     procurement_case = _get_case_or_404(session, case_id)
     selected = session.scalars(
         select(VendorCandidate)
@@ -190,9 +203,7 @@ def generate_case_rfq(
 
 
 @router.get("/{case_id}/rfq", response_model=RfqRead)
-def get_case_rfq(
-    case_id: str, session: Session = Depends(get_session)
-) -> RfqRead:
+def get_case_rfq(case_id: str, session: Session = Depends(get_session)) -> RfqRead:
     _get_case_or_404(session, case_id)
     rfq = latest_rfq(session, case_id)
     if not rfq:
@@ -204,10 +215,9 @@ def get_case_rfq(
 
 
 @router.post("/{case_id}/rfq/approve", response_model=RfqApproveResponse)
-def approve_case_rfq(
-    case_id: str, session: Session = Depends(get_session)
-) -> RfqApproveResponse:
+def approve_case_rfq(case_id: str, session: Session = Depends(get_session)) -> RfqApproveResponse:
     procurement_case = _get_case_or_404(session, case_id)
+    _require_outreach_enabled()
     rfq = latest_rfq(session, case_id)
     if not rfq:
         raise HTTPException(
@@ -237,10 +247,9 @@ def approve_case_rfq(
 
 
 @router.post("/{case_id}/outreach", response_model=OutreachSummaryRead)
-def trigger_outreach(
-    case_id: str, session: Session = Depends(get_session)
-) -> OutreachSummaryRead:
+def trigger_outreach(case_id: str, session: Session = Depends(get_session)) -> OutreachSummaryRead:
     procurement_case = _get_case_or_404(session, case_id)
+    _require_outreach_enabled()
     if procurement_case.status not in {
         CaseStatus.OUTREACH_APPROVED.value,
         CaseStatus.COLLECTING_RESPONSES.value,
@@ -278,9 +287,7 @@ def list_case_vendors(
     ).all()
     out: list[VendorWithStatusRead] = []
     for response in responses:
-        vendor = session.scalars(
-            select(Vendor).where(Vendor.id == response.vendor_id)
-        ).first()
+        vendor = session.scalars(select(Vendor).where(Vendor.id == response.vendor_id)).first()
         if not vendor:
             continue
         out.append(
@@ -300,18 +307,22 @@ def list_case_vendors(
     return out
 
 
-@router.post(
-    "/{case_id}/vendors/{vendor_id}/consent", response_model=ConsentResponse
-)
+@router.post("/{case_id}/vendors/{vendor_id}/consent", response_model=ConsentResponse)
 def set_vendor_consent(
     case_id: str,
     vendor_id: str,
     payload: ConsentRequest,
     session: Session = Depends(get_session),
 ) -> ConsentResponse:
-    _get_case_or_404(session, case_id)
+    procurement_case = _get_case_or_404(session, case_id)
     vendor = session.scalars(
-        select(Vendor).where(Vendor.id == vendor_id)
+        select(Vendor)
+        .join(VendorResponse, VendorResponse.vendor_id == Vendor.id)
+        .where(
+            Vendor.id == vendor_id,
+            VendorResponse.case_id == case_id,
+            Vendor.owner_scope == vendor_scope_for_case(session, procurement_case),
+        )
     ).first()
     if not vendor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
@@ -361,9 +372,7 @@ def list_case_responses(
 
 
 @router.get("/{case_id}/document")
-def get_case_document(
-    case_id: str, session: Session = Depends(get_session)
-) -> dict:
+def get_case_document(case_id: str, session: Session = Depends(get_session)) -> dict:
     procurement_case = _get_case_or_404(session, case_id)
     if not procurement_case.document_text:
         raise HTTPException(
